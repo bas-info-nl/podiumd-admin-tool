@@ -17,6 +17,7 @@ Municipality admins have no safe, accountable way to operate their PodiumD Envir
 ## Capabilities
 
 ### New Capabilities
+
 - `authentication`: signing in and out through the Environment's Keycloak, safe return URLs, server-held sessions, and session lifetime and expiry.
 - `access-control`: the Viewer and Operator roles, how they are assigned, and the rule that every action is authorised and denied actions are refused and recorded.
 - `audit-log`: what is recorded as Audit Entries (logins, logouts, allowed and denied actions), the guarantee that entries are append-only, the stdout copy, and browsing the Audit Log.
@@ -25,6 +26,7 @@ Municipality admins have no safe, accountable way to operate their PodiumD Envir
 - `ui-shell`: the application shell, error and status pages, and the Dutch, accessible interface.
 
 ### Modified Capabilities
+
 _None. This is the first change._
 
 ## Impact

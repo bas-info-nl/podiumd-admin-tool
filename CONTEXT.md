@@ -112,6 +112,6 @@ _Avoid_: log line, event
 
 ## Flagged ambiguities
 
-- "Manage application configuration" was ambiguous. Resolved: the **Admin Tool Instance** only *views* **Deployment Configuration** and **Runtime Configuration**. Secrets are never shown or edited. A **Check** may only compare two copies of a shared credential and report whether they match.
+- "Manage application configuration" was ambiguous. Resolved: the **Admin Tool Instance** only _views_ **Deployment Configuration** and **Runtime Configuration**. Secrets are never shown or edited. A **Check** may only compare two copies of a shared credential and report whether they match.
 - "Installation" was used loosely to mean either everything a **Municipality** runs or a single deployment. Resolved: use **Municipality** for the owner and **Environment** for a single deployment.
 - "Approval" for **Dangerous Scripts** could mean a second person or the person starting the run. Resolved: in v1 it is a **Confirmation** by the starting **Operator** themselves. Approval by a second person (four-eyes) is deferred, and the word "approval" is kept for that future concept.

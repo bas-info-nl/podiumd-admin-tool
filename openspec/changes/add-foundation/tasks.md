@@ -12,6 +12,7 @@
   - pytest-cov, with a coverage gate of ≥ 85% on `domain/` and `application/` that is enforced once the first domain code exists.
 
   Add a trivial passing test, so every tool runs green on the empty scaffold.
+
 - [ ] 1.7 Configure the frontend quality tools:
   - eslint flat config with typescript-eslint (strict, type-checked), react-hooks, jsx-a11y and i18next (no literal JSX strings);
   - prettier (TS, CSS, YAML, Markdown, JSON);
@@ -24,6 +25,7 @@
   - `hygiene`: gitleaks, actionlint, hadolint (skipped until a Dockerfile exists), pre-commit run --all-files.
 
   Pin all actions to commit SHAs.
+
 - [ ] 1.10 Add `.github/workflows/codeql.yml` (CodeQL for Python and JavaScript/TypeScript, on PRs, on push to `main` and weekly), and `.github/dependabot.yml` for pip/uv, npm and github-actions, weekly.
 - [ ] 1.11 Once the PR with 1.1–1.10 is merged, add the `backend`, `frontend`, `hygiene` and CodeQL checks as required status checks in the `protect-main` ruleset. From then on, every PR must pass them.
 
