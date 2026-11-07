@@ -73,11 +73,16 @@ CI runs the same command, so a green local run means a green `hygiene` job.
 CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs these checks on
 every pull request; run them locally before you push.
 
-| Area     | Commands                                                                                                                    |
-| -------- | --------------------------------------------------------------------------------------------------------------------------- |
-| Backend  | `uv run ruff check .`, `uv run ruff format --check .`, `uv run mypy`, `uv run lint-imports`, `uv run pytest`, coverage gate |
-| Frontend | `npm run lint`, `npm run format:check`, `npm run typecheck`, `npm run test:coverage`                                        |
-| Hygiene  | `uvx pre-commit run --all-files`, gitleaks over the full history, actionlint, hadolint                                      |
+| Area     | Commands                                                                                                                               |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Backend  | `uv run ruff check .`, `uv run ruff format --check .`, `uv run mypy`, `uv run lint-imports`, `uv run pytest`, coverage gate, pip-audit |
+| Frontend | `npm run lint`, `npm run format:check`, `npm run typecheck`, `npm run test:coverage`, `npm audit`                                      |
+| Hygiene  | `uvx pre-commit run --all-files`, gitleaks over the full history, actionlint, hadolint                                                 |
+
+CodeQL ([.github/workflows/codeql.yml](.github/workflows/codeql.yml)) analyses
+Python and TypeScript on every pull request, on `main` and weekly. Dependabot
+([.github/dependabot.yml](.github/dependabot.yml)) proposes dependency updates
+weekly. All GitHub Actions are pinned to commit SHAs.
 
 ### Coverage gate
 
