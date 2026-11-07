@@ -1,0 +1,84 @@
+# publiccode.yml — see https://yml.publiccode.tools/
+publiccodeYmlVersion: "0"
+
+name: PodiumD Admin Tool
+url: "https://github.com/bas-info-nl/podiumd-admin-tool"
+landingURL: "https://github.com/bas-info-nl/podiumd-admin-tool"
+platforms:
+  - web
+
+categories:
+  - it-management
+  - cloud-management
+
+developmentStatus: development
+softwareType: standalone/web
+
+intendedAudience:
+  countries:
+    - NL
+  scope:
+    - government
+
+description:
+  en:
+    shortDescription: >-
+      A web app that lets a municipality's administrators operate and diagnose
+      their own PodiumD Environment.
+    longDescription: >
+      The PodiumD Admin Tool is installed once per PodiumD Environment (test,
+      accp or prod) of a Municipality. It lets municipality administrators see
+      the Effective Settings of the Components in that Environment, run
+      predefined Scripts from a Script Catalogue as one-off Kubernetes Jobs,
+      run Diagnostic Runs of read-only Checks, and browse an append-only Audit
+      Log of every attempted action. Users sign in through the Environment's
+      Keycloak and get the Viewer or Operator role. The tool never changes
+      Deployment Configuration or Runtime Configuration and never shows secrets.
+      Its access is limited to the PodiumD namespace.
+    features:
+      - Sign-in through the Environment's Keycloak with Viewer and Operator roles
+      - Append-only Audit Log of every allowed or denied action
+      - Clear Environment and Municipality identification on every screen
+      - Script Runs of predefined, typed Scripts as one-off Kubernetes Jobs
+      - Diagnostic Runs of read-only Checks
+      - Effective Settings of running Components, without secrets
+  nl:
+    shortDescription: >-
+      Een webapplicatie waarmee beheerders van een gemeente hun eigen
+      PodiumD-omgeving kunnen beheren en diagnosticeren.
+    longDescription: >
+      De PodiumD Admin Tool wordt per PodiumD-omgeving (test, accp of prod) van
+      een gemeente geïnstalleerd. Beheerders zien de werkelijke instellingen van
+      de componenten in die omgeving, voeren vooraf gedefinieerde scripts uit
+      als eenmalige Kubernetes Jobs, voeren diagnoses uit met alleen-lezen
+      controles en bekijken een onveranderbaar auditlog van elke poging tot een
+      actie. Gebruikers melden zich aan via de Keycloak van de omgeving en
+      krijgen de rol Viewer of Operator. De tool wijzigt nooit configuratie en
+      toont nooit geheimen.
+    features:
+      - Aanmelden via Keycloak met de rollen Viewer en Operator
+      - Onveranderbaar auditlog van elke toegestane of geweigerde actie
+      - Duidelijke aanduiding van omgeving en gemeente op elk scherm
+
+legal:
+  license: EUPL-1.2
+
+maintenance:
+  type: community
+  contacts:
+    - name: Bas de Wit
+
+localisation:
+  localisationReady: true
+  availableLanguages:
+    - nl
+    - en
+
+dependsOn:
+  open:
+    - name: Kubernetes
+      optional: false
+    - name: PostgreSQL
+      optional: false
+    - name: Keycloak
+      optional: false
