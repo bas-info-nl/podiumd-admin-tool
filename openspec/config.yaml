@@ -1,0 +1,28 @@
+schema: spec-driven
+
+context: |
+  PodiumD Admin Tool: a web app installed once per PodiumD Environment (each in its own AKS cluster)
+  for municipality admins. It shows Effective Settings, runs Scripts from a Script Catalogue as
+  one-off Kubernetes Jobs, runs Diagnostic Runs of read-only Checks, and keeps an Audit Log.
+  Meant for upstream adoption by Dimpact.
+
+  Domain language: CONTEXT.md is the glossary. Use its terms exactly (Environment, Component, Script,
+  Script Catalogue, Script Run, Script Run Output, Dangerous Script, Confirmation, Viewer, Operator,
+  Audit Log, Audit Entry, Check, Finding, Diagnostic Run, Effective Settings).
+  Architecture decisions: docs/adr/0001-0011. Development practice: docs/development-requirements.md.
+  PodiumD facts: docs/research/podiumd.md.
+
+  Stack: monorepo with backend/ (Python 3.12+, FastAPI, kubernetes client, SQLAlchemy 2 + Alembic,
+  Authlib, structlog, mypy strict, hexagonal), frontend/ (React + TypeScript, Vite, TanStack Query,
+  NL Design System, generated OpenAPI client, Dutch UI with i18n), and charts/podiumd-admin/ (Helm).
+  One container image. Access is limited to the PodiumD namespace. License EUPL-1.2.
+
+rules:
+  specs:
+    - Write requirements in domain language from CONTEXT.md, and describe user-visible behaviour, not implementation.
+    - Every requirement involving an action must state its Audit Log behaviour (allowed and denied).
+  design:
+    - Reference the ADRs a decision relies on. Don't contradict an ADR; propose a new or superseding ADR instead.
+  tasks:
+    - Order tasks test-first. Each domain task starts with failing tests.
+    - Include Playwright BDD feature files for user-facing flows.
