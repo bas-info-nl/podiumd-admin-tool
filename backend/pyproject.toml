@@ -1,0 +1,129 @@
+[project]
+name = "podiumd-admin"
+version = "0.1.0"
+description = "Backend of the PodiumD Admin Tool"
+license = "EUPL-1.2"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "alembic>=1.20.1",
+    "authlib>=1.9.5",
+    "cryptography>=50.0.2",
+    "fastapi>=0.162.2",
+    "httpx>=0.28.1",
+    "psycopg[binary]>=3.3.8",
+    "pydantic-settings>=2.16.2",
+    "sqlalchemy>=2.1.8",
+    "structlog>=26.1.0",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.8.15,<0.9.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "import-linter>=2.16",
+    "mypy>=2.4.1",
+    "pip-audit>=2.10.1",
+    "pytest>=9.2.0",
+    "pytest-asyncio>=1.4.1.post1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.17.4",
+    "testcontainers>=4.15.0",
+]
+
+# --- Quality tools -----------------------------------------------------------
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+  "E",     # pycodestyle errors
+  "W",     # pycodestyle warnings
+  "F",     # pyflakes
+  "I",     # isort (import sorting)
+  "B",     # flake8-bugbear
+  "S",     # flake8-bandit (security)
+  "UP",    # pyupgrade
+  "N",     # pep8-naming
+  "C4",    # flake8-comprehensions
+  "SIM",   # flake8-simplify
+  "PT",    # flake8-pytest-style
+  "DTZ",   # flake8-datetimez (no naive datetimes)
+  "T20",   # flake8-print (log through structlog instead)
+  "ASYNC", # flake8-async
+  "RUF",   # ruff-specific rules
+]
+
+[tool.ruff.lint.per-file-ignores]
+# pytest uses plain assert statements.
+"tests/**" = ["S101"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["podiumd_admin"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src", "tests"]
+warn_unreachable = true
+
+[tool.importlinter]
+root_package = "podiumd_admin"
+# Needed so contracts can forbid third-party packages such as fastapi.
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Hexagonal layers: adapters -> application -> ports -> domain (ADR 0009)"
+type = "layers"
+containers = ["podiumd_admin"]
+layers = ["adapters", "application", "ports", "domain"]
+
+[[tool.importlinter.contracts]]
+name = "Domain and application import no web, persistence or OIDC framework (ADR 0009)"
+type = "forbidden"
+source_modules = ["podiumd_admin.domain", "podiumd_admin.application"]
+forbidden_modules = [
+  "fastapi",
+  "starlette",
+  "uvicorn",
+  "sqlalchemy",
+  "alembic",
+  "psycopg",
+  "authlib",
+  "httpx",
+]
+
+[tool.pytest.ini_options]
+minversion = "9.0"
+testpaths = ["tests"]
+addopts = [
+  "--strict-markers",
+  "--strict-config",
+  "-ra",
+  "--cov=podiumd_admin",
+  "--cov-report=term-missing",
+  "--cov-report=xml",
+]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = ["error"]
+
+[tool.coverage.run]
+source = ["podiumd_admin"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError", "\\.\\.\\."]
+# The >= 85% gate on domain/ and application/ (design D9) is a separate step,
+# because it must not count adapters. It passes on the empty scaffold (empty
+# modules are skipped) and starts to bite with the first domain code, because
+# `source` also reports modules no test imports. Run it after pytest:
+#   uv run coverage report --include='src/podiumd_admin/domain/*,src/podiumd_admin/application/*' --fail-under=85
+# See README.md ("Coverage gate").
