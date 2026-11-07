@@ -29,6 +29,71 @@ and keeps an append-only Audit Log of every attempted action.
 | `e2e/`      | Playwright BDD end-to-end tests                              |
 | `docs/`     | ADRs, development requirements and research                  |
 
+## Development
+
+Prerequisites: [uv](https://docs.astral.sh/uv/) and Node.js 22.22 or later
+(with npm). uv installs Python 3.12 for the backend.
+
+```sh
+# Backend
+cd backend
+uv sync
+uv run pytest
+
+# Frontend
+cd frontend
+npm ci
+npm run dev
+
+# End-to-end tests (against a running Admin Tool Instance, E2E_BASE_URL)
+cd e2e
+npm ci
+npx playwright install chromium
+npm test
+```
+
+### Pre-commit hooks
+
+The hooks in [.pre-commit-config.yaml](.pre-commit-config.yaml) run ruff,
+prettier, eslint, gitleaks, hadolint, actionlint and whitespace fixers on every
+commit. The ruff, prettier and eslint hooks use the versions locked in the
+backend and frontend, so install those first. Then install the hooks once per
+clone:
+
+```sh
+(cd backend && uv sync) && (cd frontend && npm ci)
+uvx pre-commit install
+```
+
+Run all hooks against the whole repository with `uvx pre-commit run --all-files`.
+CI runs the same command, so a green local run means a green `hygiene` job.
+
+### Quality gates
+
+CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs these checks on
+every pull request; run them locally before you push.
+
+| Area     | Commands                                                                                                                    |
+| -------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Backend  | `uv run ruff check .`, `uv run ruff format --check .`, `uv run mypy`, `uv run lint-imports`, `uv run pytest`, coverage gate |
+| Frontend | `npm run lint`, `npm run format:check`, `npm run typecheck`, `npm run test:coverage`                                        |
+| Hygiene  | `uvx pre-commit run --all-files`, gitleaks over the full history, actionlint, hadolint                                      |
+
+### Coverage gate
+
+The domain and application layers need at least 85% coverage (lines and branches
+combined, design D9). The gate runs after pytest in `backend/`:
+
+```sh
+uv run pytest
+uv run coverage report --include="src/podiumd_admin/domain/*,src/podiumd_admin/application/*" --fail-under=85
+```
+
+It is already enforced in CI. While `domain/` and `application/` hold only empty
+packages it passes trivially (empty modules are skipped); the first domain or
+application module without enough tests fails it, because coverage also reports
+modules no test imports. Adapters are not part of the gate.
+
 ## Licence
 
 Licensed under the [EUPL-1.2](LICENSE). See also [publiccode.yml](publiccode.yml).
