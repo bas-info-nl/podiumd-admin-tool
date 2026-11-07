@@ -1,10 +1,31 @@
-## 1. Repository scaffold
+## 1. Repository scaffold and quality gates
 
 - [ ] 1.1 Run `git init`. Add `.gitignore`, `.editorconfig`, the EUPL-1.2 `LICENSE`, `publiccode.yml`, a `README.md` (purpose, links to CONTEXT.md/ADRs), and `CLAUDE.md` (pointers to CONTEXT.md, ADRs, development-requirements; TDD rule).
 - [ ] 1.2 Create `backend/` with uv: Python 3.12, a `pyproject.toml` with FastAPI, uvicorn, SQLAlchemy 2, Alembic, psycopg, Authlib, httpx, structlog, pydantic-settings and cryptography; dev deps pytest, pytest-asyncio, testcontainers, ruff, mypy, import-linter, pip-audit.
 - [ ] 1.3 Create the hexagonal package layout `podiumd_admin/{domain,application,ports,adapters/{http,db,oidc,logging}}`, with an import-linter contract that the domain and application layers import no FastAPI, SQLAlchemy or Authlib (D1). Add a test that runs the contract.
 - [ ] 1.4 Create `frontend/` with Vite, React and TypeScript: React Router, TanStack Query, react-i18next (`nl` default), `@utrecht/component-library-react`, eslint, vitest + Testing Library.
 - [ ] 1.5 Create the `e2e/` package with `playwright-bdd`, `@axe-core/playwright` and an empty features folder. Add an npm script that generates and runs the tests.
+- [ ] 1.6 Configure the backend quality tools in `pyproject.toml`:
+  - ruff (lint + format, including the bugbear, security (`S`), import-sorting and pyupgrade rule sets);
+  - `mypy --strict`;
+  - import-linter;
+  - pytest-cov, with a coverage gate of ≥ 85% on `domain/` and `application/` that is enforced once the first domain code exists.
+
+  Add a trivial passing test, so every tool runs green on the empty scaffold.
+- [ ] 1.7 Configure the frontend quality tools:
+  - eslint flat config with typescript-eslint (strict, type-checked), react-hooks, jsx-a11y and i18next (no literal JSX strings);
+  - prettier (TS, CSS, YAML, Markdown, JSON);
+  - `tsc --noEmit`;
+  - vitest with coverage.
+- [ ] 1.8 Add a `.pre-commit-config.yaml` with ruff (lint + format), prettier, eslint, gitleaks, hadolint, actionlint and end-of-file/trailing-whitespace fixers. Document `pre-commit install` in the README.
+- [ ] 1.9 Add `.github/workflows/ci.yml`, running on every PR and on push to `main`, with these jobs:
+  - `backend`: ruff check, ruff format --check, mypy, import-linter, pytest + coverage;
+  - `frontend`: eslint, prettier --check, tsc, vitest + coverage;
+  - `hygiene`: gitleaks, actionlint, hadolint (skipped until a Dockerfile exists), pre-commit run --all-files.
+
+  Pin all actions to commit SHAs.
+- [ ] 1.10 Add `.github/workflows/codeql.yml` (CodeQL for Python and JavaScript/TypeScript, on PRs, on push to `main` and weekly), and `.github/dependabot.yml` for pip/uv, npm and github-actions, weekly.
+- [ ] 1.11 Once the PR with 1.1–1.10 is merged, add the `backend`, `frontend`, `hygiene` and CodeQL checks as required status checks in the `protect-main` ruleset. From then on, every PR must pass them.
 
 ## 2. Domain: roles, permissions, Environment identity (test-first)
 
@@ -70,7 +91,7 @@
 ## 10. Container image
 
 - [ ] 10.1 Write a multi-stage Dockerfile: node build → uv install → `python:3.12-slim`, uid 1000, no shell tools needed at runtime, `/tmp` the only writable path.
-- [ ] 10.2 Add a container smoke test in CI: the image starts with a read-only root filesystem and `/healthz` responds.
+- [ ] 10.2 Add an `image` job to `ci.yml` that runs hadolint and builds the image. Add a Trivy scan that fails on HIGH or CRITICAL fixable vulnerabilities, and a smoke test: the image starts with a read-only root filesystem and `/healthz` responds. Make the job a required status check.
 
 ## 11. Helm chart `charts/podiumd-admin`
 
@@ -78,7 +99,7 @@
 - [ ] 11.2 Add the Deployment: 1 replica, `Recreate` strategy, hardened securityContext, a `/tmp` emptyDir, liveness and readiness probes, and env from values and Secrets. Add the Service, an optional Ingress, and an optional HTTPRoute.
 - [ ] 11.3 Add the pre-install and pre-upgrade migration hook Job (`alembic upgrade head` with the owner credentials).
 - [ ] 11.4 Add the ServiceAccount, Role and RoleBinding skeleton (namespace-scoped, minimal).
-- [ ] 11.5 Write helm-unittest tests: schema failures for missing required values; the security context; no ClusterRole or ClusterRoleBinding; no `pods/exec`; no `list`/`watch` on Secrets; the hook Job uses owner credentials and the Deployment uses app credentials.
+- [ ] 11.5 Add a `chart` job to `ci.yml`, running helm lint, helm-unittest, and kubeconform against the rendered templates for the supported Kubernetes versions, and make it a required status check. Write helm-unittest tests: schema failures for missing required values; the security context; no ClusterRole or ClusterRoleBinding; no `pods/exec`; no `list`/`watch` on Secrets; the hook Job uses owner credentials and the Deployment uses app credentials.
 - [ ] 11.6 Write `docs/install.md`. Cover creating the Keycloak client (confidential, exact redirect URIs, client roles, back-channel logout URL, access-token lifespan ≤5 min), creating the database with owner and app roles (SQL), Secrets and key generation, `trustedProxies`, and the expected deploy-side HTTPRoute.
 
 ## 12. Local development
@@ -94,15 +115,11 @@
 - [ ] 13.4 Write feature `sign-out.feature`: "Afmelden" ends the session and the Keycloak session; the signed-out page is shown; the `sign-out` entry is visible after signing in again.
 - [ ] 13.5 Write feature `accessibility.feature`: run an axe-core WCAG 2.2 A/AA check on every page above, and a keyboard-only flow that filters the Audit Log and signs out.
 
-## 14. CI and release
+## 14. End-to-end CI and release
 
-- [ ] 14.1 Add a GitHub Actions `ci.yml` with these jobs:
-  - backend: ruff, mypy --strict, import-linter, pytest including testcontainers;
-  - frontend: eslint, tsc, vitest, plus a check that the generated client is up to date;
-  - chart: helm lint, helm-unittest.
-- [ ] 14.2 Add the e2e job: kind, plus the chart installed with the dev values, Keycloak and PostgreSQL, then run playwright-bdd and upload the report.
-- [ ] 14.3 Add dependency scanning on every PR (pip-audit, npm audit, Trivy image scan), and Dependabot config.
-- [ ] 14.4 Add `release.yml` for tags: build and push the image, sign it with cosign, attach an SBOM, and package and publish the Helm chart.
+- [ ] 14.1 Add an `e2e` job to `ci.yml`: install the chart with the dev values, Keycloak and PostgreSQL on kind, run playwright-bdd, and upload the report. Make it a required status check.
+- [ ] 14.2 Add pip-audit and npm audit (fail on known vulnerabilities with a fix available) to the `backend` and `frontend` jobs.
+- [ ] 14.3 Add `release.yml` for tags: build and push the image, sign it with cosign, attach an SBOM, and package and publish the Helm chart.
 
 ## 15. Wrap-up
 

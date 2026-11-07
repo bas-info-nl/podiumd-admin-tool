@@ -8,12 +8,16 @@ This is input for the OpenSpec project config and CLAUDE.md. These are working p
 - End-to-end tests use **Playwright BDD** (`playwright-bdd`): Gherkin `.feature` files describe user flows in domain language (see CONTEXT.md), backed by Playwright step definitions. Cover at least: login as Viewer/Operator, a denied action, running a Script, running a Dangerous Script with Confirmation, viewing Script Run Output, a Diagnostic Run, and viewing the Audit Log.
 - Frontend unit and component tests use Vitest + Testing Library.
 
-## CI (GitHub Actions)
-- Backend: ruff, mypy --strict, pytest.
-- Frontend: eslint, tsc, vitest.
-- Chart: helm lint, `helm template` snapshot tests, and a check that the RBAC is namespace-scoped and grants no `pods/exec` or `secrets` list.
-- Playwright BDD e2e tests against kind.
-- Image build, signing and SBOM on tags. Dependency scanning on every PR.
+## Quality gates
+- Quality checks exist from the first PR, and each one becomes a required status check on `main` as soon as it exists. `main` only accepts PRs.
+- **Locally:** pre-commit hooks for ruff, prettier, eslint, gitleaks, hadolint, actionlint and whitespace fixers.
+- **Backend:** ruff (lint + format), mypy --strict, import-linter (hexagonal boundaries), pytest with a coverage gate of ≥ 85% on domain/application, pip-audit.
+- **Frontend:** eslint (typescript-eslint strict, react-hooks, jsx-a11y, i18next), prettier, tsc, vitest with coverage, npm audit.
+- **Repository:** gitleaks, actionlint, CodeQL (Python and TypeScript), Dependabot (weekly). Actions are pinned to commit SHAs.
+- **Chart:** helm lint, helm-unittest, kubeconform. The RBAC must be namespace-scoped, with no `pods/exec` and no Secrets `list`.
+- **Image:** hadolint, Trivy (fails on HIGH or CRITICAL fixable vulnerabilities), smoke test. On tags: cosign signing and an SBOM.
+- **E2E:** Playwright BDD on kind.
+- SonarCloud is deliberately not used.
 
 ## Local development
 - kind + Tilt as the main loop. docker-compose as a fallback for working on the frontend and backend only.
