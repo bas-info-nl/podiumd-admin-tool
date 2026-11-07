@@ -1,0 +1,8 @@
+{
+  "app": {
+    "title": "PodiumD Admin"
+  },
+  "home": {
+    "intro": "Operate and diagnose this PodiumD Environment."
+  }
+}

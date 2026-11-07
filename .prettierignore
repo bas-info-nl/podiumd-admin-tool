@@ -1,0 +1,16 @@
+# Generated or vendored files
+**/package-lock.json
+**/node_modules/
+**/dist/
+**/coverage/
+**/playwright-report/
+**/test-results/
+**/.features-gen/
+backend/.venv/
+backend/uv.lock
+
+# Licence text is kept verbatim
+LICENSE
+
+# Claude Code configuration is managed separately
+.claude/
