@@ -130,13 +130,16 @@ A multi-stage Dockerfile: node build → uv build → `python:3.12-slim` runtime
 - **Unit tests.** pytest for the domain and application layers, written test-first.
 - **Integration tests.** testcontainers for PostgreSQL (the grants and append-only guarantee) and Keycloak (the OIDC flow).
 - **End-to-end tests.** `playwright-bdd` features written in English Gherkin using CONTEXT.md terms, while asserting the Dutch UI text. They run against the kind environment in CI, with axe-core checks on every page visited.
-- **CI.** GitHub Actions jobs:
-  - backend: ruff, mypy --strict, import-linter, pytest;
-  - frontend: eslint, tsc, vitest, plus a check that the generated client is up to date;
-  - chart: helm lint, helm-unittest;
-  - e2e: kind;
-  - **dependency scanning on every PR:** pip-audit, npm audit, and Trivy on the image;
-  - image: build, plus cosign signing and an SBOM on tags.
+- **Quality gates from the first PR.** Pre-commit hooks locally. In CI, on every PR:
+  - `backend`: ruff lint + format, mypy --strict, import-linter, pytest with a coverage gate of ≥ 85% on domain/application, pip-audit;
+  - `frontend`: eslint with typescript-eslint strict, jsx-a11y and i18next; prettier; tsc; vitest with coverage; npm audit; a check that the generated client is up to date;
+  - `hygiene`: gitleaks, actionlint, hadolint;
+  - CodeQL for Python and TypeScript;
+  - `chart`: helm lint, helm-unittest, kubeconform;
+  - `image`: build, Trivy, smoke test;
+  - `e2e`: kind + playwright-bdd.
+
+  Each job becomes a required status check in the `protect-main` ruleset as soon as it exists. Dependabot runs weekly. Release: cosign signing and an SBOM on tags. SonarCloud was considered and rejected; the tools above cover lint, types, security static analysis and coverage without an external service.
 - **Deferred.** The docker-compose fallback from the development requirements is deferred to a later change. kind + Tilt is the only supported loop for now.
 
 ## Risks / Trade-offs
