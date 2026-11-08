@@ -10,6 +10,7 @@ does not depend on reading the Audit Log, and the other way round.
 
 from __future__ import annotations
 
+import uuid
 from typing import Protocol
 
 from podiumd_admin.domain.audit import AuditEntry, UnauthenticatedFailureSummary
@@ -29,6 +30,10 @@ class AuditLogReader(Protocol):
 
     async def search(self, query: AuditLogQuery) -> AuditLogPage:
         """Return the page ``query`` asks for: matching entries, newest first."""
+        ...
+
+    async def get(self, entry_id: uuid.UUID) -> AuditEntry | None:
+        """Return the Audit Entry with ``entry_id``, or ``None`` if there is none."""
         ...
 
 
