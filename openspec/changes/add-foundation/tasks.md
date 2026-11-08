@@ -1,30 +1,32 @@
 ## 1. Repository scaffold and quality gates
 
-- [ ] 1.1 Run `git init`. Add `.gitignore`, `.editorconfig`, the EUPL-1.2 `LICENSE`, `publiccode.yml`, a `README.md` (purpose, links to CONTEXT.md/ADRs), and `CLAUDE.md` (pointers to CONTEXT.md, ADRs, development-requirements; TDD rule).
-- [ ] 1.2 Create `backend/` with uv: Python 3.12, a `pyproject.toml` with FastAPI, uvicorn, SQLAlchemy 2, Alembic, psycopg, Authlib, httpx, structlog, pydantic-settings and cryptography; dev deps pytest, pytest-asyncio, testcontainers, ruff, mypy, import-linter, pip-audit.
-- [ ] 1.3 Create the hexagonal package layout `podiumd_admin/{domain,application,ports,adapters/{http,db,oidc,logging}}`, with an import-linter contract that the domain and application layers import no FastAPI, SQLAlchemy or Authlib (D1). Add a test that runs the contract.
-- [ ] 1.4 Create `frontend/` with Vite, React and TypeScript: React Router, TanStack Query, react-i18next (`nl` default), `@utrecht/component-library-react`, eslint, vitest + Testing Library.
-- [ ] 1.5 Create the `e2e/` package with `playwright-bdd`, `@axe-core/playwright` and an empty features folder. Add an npm script that generates and runs the tests.
-- [ ] 1.6 Configure the backend quality tools in `pyproject.toml`:
+- [x] 1.1 Run `git init`. Add `.gitignore`, `.editorconfig`, the EUPL-1.2 `LICENSE`, `publiccode.yml`, a `README.md` (purpose, links to CONTEXT.md/ADRs), and `CLAUDE.md` (pointers to CONTEXT.md, ADRs, development-requirements; TDD rule).
+- [x] 1.2 Create `backend/` with uv: Python 3.12, a `pyproject.toml` with FastAPI, uvicorn, SQLAlchemy 2, Alembic, psycopg, Authlib, httpx, structlog, pydantic-settings and cryptography; dev deps pytest, pytest-asyncio, testcontainers, ruff, mypy, import-linter, pip-audit.
+- [x] 1.3 Create the hexagonal package layout `podiumd_admin/{domain,application,ports,adapters/{http,db,oidc,logging}}`, with an import-linter contract that the domain and application layers import no FastAPI, SQLAlchemy or Authlib (D1). Add a test that runs the contract.
+- [x] 1.4 Create `frontend/` with Vite, React and TypeScript: React Router, TanStack Query, react-i18next (`nl` default), `@utrecht/component-library-react`, eslint, vitest + Testing Library.
+- [x] 1.5 Create the `e2e/` package with `playwright-bdd`, `@axe-core/playwright` and an empty features folder. Add an npm script that generates and runs the tests.
+- [x] 1.6 Configure the backend quality tools in `pyproject.toml`:
   - ruff (lint + format, including the bugbear, security (`S`), import-sorting and pyupgrade rule sets);
   - `mypy --strict`;
   - import-linter;
   - pytest-cov, with a coverage gate of ≥ 85% on `domain/` and `application/` that is enforced once the first domain code exists.
 
   Add a trivial passing test, so every tool runs green on the empty scaffold.
-- [ ] 1.7 Configure the frontend quality tools:
+
+- [x] 1.7 Configure the frontend quality tools:
   - eslint flat config with typescript-eslint (strict, type-checked), react-hooks, jsx-a11y and i18next (no literal JSX strings);
   - prettier (TS, CSS, YAML, Markdown, JSON);
   - `tsc --noEmit`;
   - vitest with coverage.
-- [ ] 1.8 Add a `.pre-commit-config.yaml` with ruff (lint + format), prettier, eslint, gitleaks, hadolint, actionlint and end-of-file/trailing-whitespace fixers. Document `pre-commit install` in the README.
-- [ ] 1.9 Add `.github/workflows/ci.yml`, running on every PR and on push to `main`, with these jobs:
+- [x] 1.8 Add a `.pre-commit-config.yaml` with ruff (lint + format), prettier, eslint, gitleaks, hadolint, actionlint and end-of-file/trailing-whitespace fixers. Document `pre-commit install` in the README.
+- [x] 1.9 Add `.github/workflows/ci.yml`, running on every PR and on push to `main`, with these jobs:
   - `backend`: ruff check, ruff format --check, mypy, import-linter, pytest + coverage;
   - `frontend`: eslint, prettier --check, tsc, vitest + coverage;
   - `hygiene`: gitleaks, actionlint, hadolint (skipped until a Dockerfile exists), pre-commit run --all-files.
 
   Pin all actions to commit SHAs.
-- [ ] 1.10 Add `.github/workflows/codeql.yml` (CodeQL for Python and JavaScript/TypeScript, on PRs, on push to `main` and weekly), and `.github/dependabot.yml` for pip/uv, npm and github-actions, weekly.
+
+- [x] 1.10 Add `.github/workflows/codeql.yml` (CodeQL for Python and JavaScript/TypeScript, on PRs, on push to `main` and weekly), and `.github/dependabot.yml` for pip/uv, npm and github-actions, weekly.
 - [ ] 1.11 Once the PR with 1.1–1.10 is merged, add the `backend`, `frontend`, `hygiene` and CodeQL checks as required status checks in the `protect-main` ruleset. From then on, every PR must pass them.
 
 ## 2. Domain: roles, permissions, Environment identity (test-first)

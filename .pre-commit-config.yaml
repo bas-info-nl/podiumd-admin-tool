@@ -1,0 +1,71 @@
+# Install once with `uvx pre-commit install` (see README.md).
+# Hook repositories are pinned to commit SHAs; update with
+# `uvx pre-commit autoupdate --freeze`.
+#
+# The ruff, prettier and eslint hooks run the versions locked in backend/uv.lock
+# and frontend/package-lock.json, so local hooks and CI never disagree. They
+# need `uv` and `npm ci` in frontend/ first.
+minimum_pre_commit_version: "3.2.0"
+default_install_hook_types: [pre-commit]
+# .claude/ is Claude Code configuration; LICENSE is kept verbatim.
+exclude: ^(\.claude/|LICENSE$)
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c # frozen: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-added-large-files
+
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check (backend)
+        entry: uv run --project backend --frozen ruff check --fix --force-exclude
+        language: system
+        types_or: [python, pyi]
+        files: ^backend/
+        require_serial: true
+      - id: ruff-format
+        name: ruff format (backend)
+        entry: uv run --project backend --frozen ruff format --force-exclude
+        language: system
+        types_or: [python, pyi]
+        files: ^backend/
+        require_serial: true
+      - id: prettier
+        name: prettier
+        entry: frontend/node_modules/.bin/prettier --write --ignore-unknown
+        language: system
+        types_or: [javascript, jsx, ts, tsx, css, json, yaml, markdown]
+        require_serial: true
+      - id: eslint
+        name: eslint (frontend)
+        # eslint runs from frontend/ so it finds its flat config and tsconfig.
+        entry: bash -c 'cd frontend && exec node_modules/.bin/eslint --max-warnings=0 --fix "${@#frontend/}"' --
+        language: system
+        files: ^frontend/.*\.(js|jsx|ts|tsx)$
+        require_serial: true
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: 83d9cd684c87d95d656c1458ef04895a7f1cbd8e # frozen: v8.30.1
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/AleksaC/hadolint-py
+    rev: 6e7504451511eaeb62a3e7f14d63b0296cbf86eb # frozen: v2.15.1
+    hooks:
+      - id: hadolint
+
+  - repo: https://github.com/rhysd/actionlint
+    rev: 914e7df21a07ef503a81201c76d2b11c789d3fca # frozen: v1.7.12
+    hooks:
+      - id: actionlint

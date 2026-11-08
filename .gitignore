@@ -1,2 +1,37 @@
+# OS / editor
 .DS_Store
+.idea/
+.vscode/
+
+# Claude Code local settings
 .claude/settings.local.json
+
+# Python / uv
+.venv/
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.import_linter_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+*.egg-info/
+build/
+
+# Node
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+blob-report/
+.features-gen/
+*.tsbuildinfo
+
+# Local environment files
+.env
+.env.*
+!.env.example
