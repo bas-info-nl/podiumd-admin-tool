@@ -127,7 +127,7 @@ Values `environment.municipality`, `environment.stage` (enum `test|accp|prod`, e
 ### D6. Frontend
 
 - **Libraries.** React + TypeScript + Vite, React Router, TanStack Query.
-- **NL Design System.** Components from `@utrecht/component-library-react`, with an own `podiumd-admin` token theme. Considered: the Dimpact or Denhaag themes. Those are municipality branding, and the tool must look neutral across municipalities.
+- **NL Design System.** The NL Design System **CSS components** from `@utrecht/component-library-css`, plus design tokens, with our own thin React components in `frontend/src/components/nlds/` that render semantic HTML with the NL Design System classes. There is an own `podiumd-admin` token theme. Considered: `@utrecht/component-library-react`. It was dropped on 2026-11-08 because its peer dependencies (e.g. `@babel/runtime` 7) blocked dependency updates, while we only need a small set of components. Considered: the Dimpact or Denhaag themes. Those are municipality branding, and the tool must look neutral across municipalities.
 - **i18n.** `react-i18next` with `nl` as default and `en` for development.
 - **API client.** Generated from the backend OpenAPI spec with `openapi-typescript` + `openapi-fetch`. CI fails if the committed client is out of date.
 
@@ -168,7 +168,7 @@ A multi-stage Dockerfile: node build → uv build → `python:3.12-slim` runtime
 - **[A role change takes effect only at the next refresh]** → Keep the access-token lifespan for the client short (≤5 minutes). Back-channel logout ends sessions immediately when the user's Keycloak session ends.
 - **[A single replica means downtime during upgrades]** → Accepted for an admin tool (ADR 0010). Use the `Recreate` strategy so two versions never run against the same schema.
 - **[The append-only Audit Log grows without bound]** → Retention is out of scope for now (user decision, 2026-11-05). Unauthenticated noise is kept out of the table (D4). Revisit before large-scale prod use.
-- **[NL Design System React components are still maturing]** → Wrap them in thin local components so a library swap stays local.
+- **[We maintain our own NL Design System React components]** → Keep them thin: semantic HTML plus the NL Design System CSS classes, with no behaviour of their own. Add components only when a page needs them, and cover each with a component test.
 - **[A secret-encryption key in a Kubernetes Secret]** → If it rotates, all sessions are invalidated. That's acceptable: users sign in again.
 - **[Keycloak client provisioning is manual]** → Document it, and add a realm-import snippet to propose upstream to the PodiumD Keycloak configuration.
 

@@ -3,7 +3,7 @@
 - [x] 1.1 Run `git init`. Add `.gitignore`, `.editorconfig`, the EUPL-1.2 `LICENSE`, `publiccode.yml`, a `README.md` (purpose, links to CONTEXT.md/ADRs), and `CLAUDE.md` (pointers to CONTEXT.md, ADRs, development-requirements; TDD rule).
 - [x] 1.2 Create `backend/` with uv: Python 3.12, a `pyproject.toml` with FastAPI, uvicorn, SQLAlchemy 2, Alembic, psycopg, Authlib, httpx, structlog, pydantic-settings and cryptography; dev deps pytest, pytest-asyncio, testcontainers, ruff, mypy, import-linter, pip-audit.
 - [x] 1.3 Create the hexagonal package layout `podiumd_admin/{domain,application,ports,adapters/{http,db,oidc,logging}}`, with an import-linter contract that the domain and application layers import no FastAPI, SQLAlchemy or Authlib (D1). Add a test that runs the contract.
-- [x] 1.4 Create `frontend/` with Vite, React and TypeScript: React Router, TanStack Query, react-i18next (`nl` default), `@utrecht/component-library-react`, eslint, vitest + Testing Library.
+- [x] 1.4 Create `frontend/` with Vite, React and TypeScript: React Router, TanStack Query, react-i18next (`nl` default), NL Design System CSS (`@utrecht/component-library-css`, replacing the React library since 2026-11-08), eslint, vitest + Testing Library.
 - [x] 1.5 Create the `e2e/` package with `playwright-bdd`, `@axe-core/playwright` and an empty features folder. Add an npm script that generates and runs the tests.
 - [x] 1.6 Configure the backend quality tools in `pyproject.toml`:
   - ruff (lint + format, including the bugbear, security (`S`), import-sorting and pyupgrade rule sets);
@@ -81,7 +81,7 @@
 
 ## 9. Frontend
 
-- [ ] 9.1 Add the `podiumd-admin` design-token theme, including tokens for the test, accp and prod banners (contrast ≥ 4.5:1, prod full-width red), plus thin wrapper components around the Utrecht components.
+- [ ] 9.1 Add the `podiumd-admin` design-token theme, including tokens for the test, accp and prod banners (contrast ≥ 4.5:1, prod full-width red), plus the thin NL Design System React components that the pages need, in `frontend/src/components/nlds/` (semantic HTML plus NL Design System CSS classes).
 - [ ] 9.2 Generate the typed API client from the exported `openapi.json` (`openapi-typescript` + `openapi-fetch`). The client always sends `X-PodiumD-Admin: 1` on non-GET. On 401, it starts sign-in with the current path.
 - [ ] 9.3 Build the Environment banner and the tab-title helper (`<page> · <stage name> · <Municipality> · PodiumD Admin`), with component tests for all three stages.
 - [ ] 9.4 Build the app shell (banner, user name and role, "Afmelden", navigation filtered by permissions) and the start page listing the available sections. Write component tests first.
