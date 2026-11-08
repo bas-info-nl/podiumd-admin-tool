@@ -14,12 +14,41 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy import Row, insert, select
+from sqlalchemy import ColumnElement, Row, func, insert, select
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from podiumd_admin.adapters.db.tables import audit_entries
 from podiumd_admin.domain.audit import AuditEntry, Outcome, ReasonCode
+from podiumd_admin.domain.audit_log import AUDIT_LOG_PAGE_SIZE, AuditLogPage, AuditLogQuery
 from podiumd_admin.domain.environment import EnvironmentIdentity, Stage
+
+_LIKE_ESCAPE = "\\"
+
+
+def _contains(value: str) -> str:
+    """A LIKE pattern matching ``value`` anywhere, with its wildcards taken literally."""
+    escaped = (
+        value.replace(_LIKE_ESCAPE, _LIKE_ESCAPE * 2)
+        .replace("%", _LIKE_ESCAPE + "%")
+        .replace("_", _LIKE_ESCAPE + "_")
+    )
+    return f"%{escaped}%"
+
+
+def _conditions(query: AuditLogQuery) -> list[ColumnElement[bool]]:
+    columns = audit_entries.c
+    conditions: list[ColumnElement[bool]] = []
+    if query.occurred_from is not None:
+        conditions.append(columns.occurred_at >= query.occurred_from)
+    if query.occurred_until is not None:
+        conditions.append(columns.occurred_at <= query.occurred_until)
+    if query.username is not None:
+        conditions.append(columns.username.ilike(_contains(query.username), escape=_LIKE_ESCAPE))
+    if query.action is not None:
+        conditions.append(columns.action == query.action)
+    if query.outcome is not None:
+        conditions.append(columns.outcome == query.outcome.value)
+    return conditions
 
 
 def _to_row(entry: AuditEntry) -> dict[str, Any]:
@@ -64,7 +93,10 @@ def _to_entry(row: Row[Any]) -> AuditEntry:
 
 
 class SqlAuditRepository:
-    """Stores and reads Audit Entries on the caller's connection."""
+    """Stores and reads Audit Entries on the caller's connection.
+
+    Implements both ``AuditRepository`` and ``AuditLogReader``.
+    """
 
     def __init__(self, connection: AsyncConnection) -> None:
         self._connection = connection
@@ -72,6 +104,35 @@ class SqlAuditRepository:
     async def add(self, entry: AuditEntry) -> None:
         """Insert ``entry`` in the caller's transaction. Raises if the database refuses it."""
         await self._connection.execute(insert(audit_entries).values(_to_row(entry)))
+
+    async def search(self, query: AuditLogQuery) -> AuditLogPage:
+        """Return the page ``query`` asks for: matching entries, newest first.
+
+        Entries with the same timestamp are ordered by id, so paging never
+        shows an entry twice or skips one. The total is counted in the same
+        statement as the page, so the two always agree.
+        """
+        conditions = _conditions(query)
+        total_matching = func.count().over().label("total_matching")
+        result = await self._connection.execute(
+            select(audit_entries, total_matching)
+            .where(*conditions)
+            .order_by(audit_entries.c.occurred_at.desc(), audit_entries.c.id.desc())
+            .limit(AUDIT_LOG_PAGE_SIZE)
+            .offset(query.offset)
+        )
+        rows = result.all()
+        if rows:
+            total = int(rows[0].total_matching)
+        elif query.offset == 0:
+            total = 0
+        else:
+            # A page past the end has no rows to carry the total.
+            count = select(func.count()).select_from(audit_entries).where(*conditions)
+            total = int((await self._connection.execute(count)).scalar_one())
+        return AuditLogPage(
+            entries=tuple(_to_entry(row) for row in rows), page=query.page, total=total
+        )
 
     async def get(self, entry_id: uuid.UUID) -> AuditEntry | None:
         """Return the Audit Entry with ``entry_id``, or ``None`` if there is none."""

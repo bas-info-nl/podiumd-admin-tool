@@ -22,6 +22,7 @@ from podiumd_admin.adapters.db.audit import SqlAuditRepository
 from podiumd_admin.adapters.db.tables import STORED_REASONS
 from podiumd_admin.domain.audit import AuditEntry, Outcome, ReasonCode
 from podiumd_admin.domain.environment import EnvironmentIdentity, Stage
+from podiumd_admin.ports.audit import AuditLogReader, AuditRepository
 
 pytestmark = pytest.mark.integration
 
@@ -43,14 +44,15 @@ def _entry(**overrides: Any) -> AuditEntry:
 
 async def _add(engine: AsyncEngine, *entries: AuditEntry) -> None:
     async with engine.begin() as connection:
-        repository = SqlAuditRepository(connection)
+        repository: AuditRepository = SqlAuditRepository(connection)
         for entry in entries:
             await repository.add(entry)
 
 
 async def _get(engine: AsyncEngine, entry_id: uuid.UUID) -> AuditEntry | None:
     async with engine.connect() as connection:
-        return await SqlAuditRepository(connection).get(entry_id)
+        reader: AuditLogReader = SqlAuditRepository(connection)
+        return await reader.get(entry_id)
 
 
 async def test_a_stored_entry_reads_back_with_every_field(app_engine: AsyncEngine) -> None:
