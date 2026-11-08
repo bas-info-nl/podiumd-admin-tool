@@ -52,6 +52,29 @@ npx playwright install chromium
 npm test
 ```
 
+### Database and integration tests
+
+The backend stores the Audit Log and sessions in PostgreSQL (ADR 0005, design
+D2/D4). Two database roles are involved: `podiumd_admin_owner` owns the schema
+and runs the Alembic migrations, and `podiumd_admin_app` is the role the
+application runs with. The app role may only read and insert Audit Entries.
+
+The persistence tests (marker `integration`, in `backend/tests/adapters/db/`)
+start a real PostgreSQL with [testcontainers](https://testcontainers.com/), so
+they need a running Docker. They are part of the default `uv run pytest` run and
+of CI. Without Docker they fail rather than skip; to leave them out locally,
+run `uv run pytest -m "not integration"`.
+
+Run the migrations against a database as the owner role:
+
+```sh
+cd backend
+PODIUMD_ADMIN_DATABASE_OWNER_URL=postgresql+psycopg://podiumd_admin_owner:...@localhost:5432/podiumd_admin \
+  uv run alembic upgrade head
+# Or print the SQL to review it first:
+uv run alembic upgrade head --sql
+```
+
 ### Pre-commit hooks
 
 The hooks in [.pre-commit-config.yaml](.pre-commit-config.yaml) run ruff,
