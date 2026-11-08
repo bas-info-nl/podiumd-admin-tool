@@ -1,4 +1,4 @@
-import { Heading1, PageContent, Paragraph } from '@utrecht/component-library-react';
+import { Heading1, PageContent, Paragraph } from '../components/nlds/nlds';
 import { useTranslation } from 'react-i18next';
 
 export function HomePage() {
