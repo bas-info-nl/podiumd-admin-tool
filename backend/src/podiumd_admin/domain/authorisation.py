@@ -15,6 +15,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from types import MappingProxyType
 from typing import Final, Literal
 
 from podiumd_admin.domain.roles import Role
@@ -27,11 +28,17 @@ class Permission(StrEnum):
     SESSION_SIGN_OUT = "session:sign-out"
 
 
-PERMISSIONS: Final[dict[Permission, frozenset[Role]]] = {
-    Permission.AUDIT_LOG_READ: frozenset({Role.VIEWER, Role.OPERATOR}),
-    Permission.SESSION_SIGN_OUT: frozenset({Role.VIEWER, Role.OPERATOR}),
-}
-"""The roles that hold each Permission. An Operator holds every Viewer permission."""
+PERMISSIONS: Final[Mapping[Permission, frozenset[Role]]] = MappingProxyType(
+    {
+        Permission.AUDIT_LOG_READ: frozenset({Role.VIEWER, Role.OPERATOR}),
+        Permission.SESSION_SIGN_OUT: frozenset({Role.VIEWER, Role.OPERATOR}),
+    }
+)
+"""The roles that hold each Permission. An Operator holds every Viewer permission.
+
+Read-only at runtime: a change to who may do what is a code change, never a
+mutation of this mapping.
+"""
 
 
 class DenialReason(StrEnum):
@@ -85,18 +92,22 @@ class Denied:
 type AuthorisationDecision = Allowed | Denied
 
 
-def authorise(
-    user: User,
-    permission: Permission,
-    permissions: Mapping[Permission, frozenset[Role]] = PERMISSIONS,
-) -> AuthorisationDecision:
-    """Decide whether ``user`` holds ``permission``.
+def authorise(user: User, permission: Permission) -> AuthorisationDecision:
+    """Decide whether ``user`` holds ``permission`` according to ``PERMISSIONS``.
 
     A user without a role is denied with ``no-role``. A user whose role does not
     hold the permission, or a permission the catalogue does not list, is denied
-    with ``missing-permission``. ``permissions`` defaults to the central
-    catalogue and is only replaced in tests.
+    with ``missing-permission``.
     """
+    return _authorise_with(user, permission, PERMISSIONS)
+
+
+def _authorise_with(
+    user: User,
+    permission: Permission,
+    permissions: Mapping[Permission, frozenset[Role]],
+) -> AuthorisationDecision:
+    """The policy against an explicit catalogue. Private: only tests pass another one."""
     if user.role is None:
         return Denied(permission=permission, reason=DenialReason.NO_ROLE)
     if user.role in permissions.get(permission, frozenset()):
