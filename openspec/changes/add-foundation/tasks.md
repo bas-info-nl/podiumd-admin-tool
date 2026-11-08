@@ -27,13 +27,13 @@
   Pin all actions to commit SHAs.
 
 - [x] 1.10 Add `.github/workflows/codeql.yml` (CodeQL for Python and JavaScript/TypeScript, on PRs, on push to `main` and weekly), and `.github/dependabot.yml` for pip/uv, npm and github-actions, weekly.
-- [ ] 1.11 Once the PR with 1.1–1.10 is merged, add the `backend`, `frontend`, `hygiene` and CodeQL checks as required status checks in the `protect-main` ruleset. From then on, every PR must pass them.
+- [x] 1.11 Once the PR with 1.1–1.10 is merged, add the `backend`, `frontend`, `hygiene` and CodeQL checks as required status checks in the `protect-main` ruleset. From then on, every PR must pass them.
 
 ## 2. Domain: roles, permissions, Environment identity (test-first)
 
-- [ ] 2.1 Write failing tests for `EnvironmentIdentity`. A Municipality and a stage (`test|accp|prod`) are required, the label is optional, and invalid values are rejected. Then implement it.
-- [ ] 2.2 Write failing tests for `Role` (Viewer, Operator) and for mapping token roles to Roles: a configurable claim path and names; both roles → Operator; a missing claim → no role. Then implement.
-- [ ] 2.3 Write failing tests that cover every permission × role for the central `PERMISSIONS` mapping (`audit-log:read`, `session:sign-out`), plus an `authorise(user, permission)` policy returning allowed or denied with a reason. Then implement.
+- [x] 2.1 Write failing tests for `EnvironmentIdentity`. A Municipality and a stage (`test|accp|prod`) are required, the label is optional, and invalid values are rejected. Then implement it.
+- [x] 2.2 Write failing tests for `Role` (Viewer, Operator) and for mapping token roles to Roles: a configurable claim path and names; both roles → Operator; a missing claim → no role. Then implement.
+- [x] 2.3 Write failing tests that cover every permission × role for the central `PERMISSIONS` mapping (`audit-log:read`, `session:sign-out`), plus an `authorise(user, permission)` policy returning allowed or denied with a reason. Then implement.
 
 ## 3. Domain: Audit Entries (test-first)
 
