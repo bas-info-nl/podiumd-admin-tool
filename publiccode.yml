@@ -2,8 +2,8 @@
 publiccodeYmlVersion: "0"
 
 name: PodiumD Admin Tool
-url: "https://github.com/bas-info-nl/podiumd-admin-tool"
-landingURL: "https://github.com/bas-info-nl/podiumd-admin-tool"
+url: "https://github.com/infonl/podiumd-admin-tool"
+landingURL: "https://github.com/infonl/podiumd-admin-tool"
 platforms:
   - web
 
@@ -66,7 +66,7 @@ legal:
 maintenance:
   type: community
   contacts:
-    - name: Bas de Wit
+    - name: INFO
 
 localisation:
   localisationReady: true
