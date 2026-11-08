@@ -7,7 +7,8 @@ never checks roles directly; later changes add their permissions, including
 Operator-only ones, to this mapping.
 
 The HTTP adapter enforces the policy (``require(permission)``) and records a
-denied Audit Entry with the reason returned here.
+denied Audit Entry with the reason returned here. Denial reasons are members of
+the Audit Log's ``ReasonCode``, the single source of reason codes.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Final, Literal
 
+from podiumd_admin.domain.audit import ReasonCode
 from podiumd_admin.domain.roles import Role
 
 
@@ -41,11 +43,12 @@ mutation of this mapping.
 """
 
 
-class DenialReason(StrEnum):
-    """Why authorisation was denied; recorded as the reason of a denied Audit Entry."""
+type AuthorisationDenialReason = Literal[ReasonCode.NO_ROLE, ReasonCode.MISSING_PERMISSION]
+"""The reason codes the authorisation policy denies with."""
 
-    NO_ROLE = "no-role"
-    MISSING_PERMISSION = "missing-permission"
+_AUTHORISATION_DENIAL_REASONS: Final = frozenset(
+    {ReasonCode.NO_ROLE, ReasonCode.MISSING_PERMISSION}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,7 +85,11 @@ class Denied:
     """The user does not hold the required Permission, for the given reason."""
 
     permission: Permission
-    reason: DenialReason
+    reason: AuthorisationDenialReason
+
+    def __post_init__(self) -> None:
+        if self.reason not in _AUTHORISATION_DENIAL_REASONS:
+            raise ValueError(f"reason {self.reason!r} is not an authorisation denial reason")
 
     @property
     def allowed(self) -> Literal[False]:
@@ -109,7 +116,7 @@ def _authorise_with(
 ) -> AuthorisationDecision:
     """The policy against an explicit catalogue. Private: only tests pass another one."""
     if user.role is None:
-        return Denied(permission=permission, reason=DenialReason.NO_ROLE)
+        return Denied(permission=permission, reason=ReasonCode.NO_ROLE)
     if user.role in permissions.get(permission, frozenset()):
         return Allowed(permission=permission)
-    return Denied(permission=permission, reason=DenialReason.MISSING_PERMISSION)
+    return Denied(permission=permission, reason=ReasonCode.MISSING_PERMISSION)
