@@ -1,8 +1,11 @@
 """Ports for the Audit Log: where Audit Entries are stored and what goes to stdout.
 
-Design D1 and D4. The database adapter implements ``AuditRepository``; the
-structlog adapter implements ``AuditSink`` and writes JSON lines with
-``log_type: "audit"`` to stdout.
+Design D1 and D4. The database adapter implements ``AuditRepository`` and
+``AuditLogReader``; the structlog adapter implements ``AuditSink`` and writes
+JSON lines with ``log_type: "audit"`` to stdout.
+
+Writing and reading are separate ports, so code that records Audit Entries
+does not depend on reading the Audit Log, and the other way round.
 """
 
 from __future__ import annotations
@@ -10,6 +13,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from podiumd_admin.domain.audit import AuditEntry, UnauthenticatedFailureSummary
+from podiumd_admin.domain.audit_log import AuditLogPage, AuditLogQuery
 
 
 class AuditRepository(Protocol):
@@ -17,6 +21,14 @@ class AuditRepository(Protocol):
 
     async def add(self, entry: AuditEntry) -> None:
         """Insert ``entry``. Raises if it could not be stored."""
+        ...
+
+
+class AuditLogReader(Protocol):
+    """Reads the Audit Log, for users with ``audit-log:read``."""
+
+    async def search(self, query: AuditLogQuery) -> AuditLogPage:
+        """Return the page ``query`` asks for: matching entries, newest first."""
         ...
 
 

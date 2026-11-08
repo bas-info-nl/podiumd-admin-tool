@@ -84,9 +84,9 @@ containers = ["podiumd_admin"]
 layers = ["adapters", "application", "ports", "domain"]
 
 [[tool.importlinter.contracts]]
-name = "Domain and application import no web, persistence or OIDC framework (ADR 0009)"
+name = "Domain, application and ports import no web, persistence or OIDC framework (ADR 0009)"
 type = "forbidden"
-source_modules = ["podiumd_admin.domain", "podiumd_admin.application"]
+source_modules = ["podiumd_admin.domain", "podiumd_admin.application", "podiumd_admin.ports"]
 forbidden_modules = [
   "fastapi",
   "starlette",
