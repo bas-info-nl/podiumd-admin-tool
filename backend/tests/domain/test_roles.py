@@ -92,6 +92,20 @@ def test_mapping_rejects_a_blank_role_name(field: str, name: str) -> None:
         RoleMapping(claim_path=("roles",), **{field: name})
 
 
+@pytest.mark.parametrize("field", ["viewer_role_name", "operator_role_name"])
+@pytest.mark.parametrize("name", [" viewer", "viewer ", "\tviewer", "viewer\n"])
+def test_mapping_rejects_a_role_name_with_surrounding_whitespace(field: str, name: str) -> None:
+    # Role names match exactly, so a padded name would silently never match a
+    # token. Fail fast at startup instead.
+    with pytest.raises(InvalidRoleMappingError, match=f"{field}.*whitespace"):
+        RoleMapping(claim_path=("roles",), **{field: name})
+
+
+def test_for_client_rejects_a_role_name_with_surrounding_whitespace() -> None:
+    with pytest.raises(InvalidRoleMappingError, match="operator_role_name"):
+        RoleMapping.for_client(CLIENT_ID, operator_role_name="operator ")
+
+
 def test_mapping_rejects_the_same_name_for_both_roles() -> None:
     with pytest.raises(InvalidRoleMappingError, match="differ"):
         RoleMapping(claim_path=("roles",), viewer_role_name="admin", operator_role_name="admin")

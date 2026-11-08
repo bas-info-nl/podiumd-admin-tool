@@ -52,6 +52,11 @@ class RoleMapping:
             name = getattr(self, field)
             if not isinstance(name, str) or not name.strip():
                 raise InvalidRoleMappingError(f"{field} must be a non-blank role name")
+            if name != name.strip():
+                # Role names match exactly, so a padded name would never match.
+                raise InvalidRoleMappingError(
+                    f"{field} must not have leading or trailing whitespace, got {name!r}"
+                )
         if self.viewer_role_name == self.operator_role_name:
             raise InvalidRoleMappingError(
                 "viewer_role_name and operator_role_name must differ, "

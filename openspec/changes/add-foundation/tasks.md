@@ -37,9 +37,9 @@
 
 ## 3. Domain: Audit Entries (test-first)
 
-- [ ] 3.1 Write failing tests for `AuditEntry`. Required fields; outcome enum `allowed|denied|succeeded|failed|info`; a `ReasonCode` enum; text-length caps; secret-like parameters rejected. Then implement.
-- [ ] 3.2 Write failing tests for the `record_then_act` application service. The action runs only after a successful insert, an insert failure prevents the action, and a denial still denies when the insert fails, logging to stdout. Use fake ports. Then implement.
-- [ ] 3.3 Write failing tests for the unauthenticated-failure aggregator: at most one line per (client IP, reason) per minute, with a count, driven by a fake Clock. Then implement.
+- [x] 3.1 Write failing tests for `AuditEntry`. Required fields; outcome enum `allowed|denied|succeeded|failed|info`; a `ReasonCode` enum; text-length caps; secret-like parameters rejected. Then implement.
+- [x] 3.2 Write failing tests for the `record_then_act` application service. The action runs only after a successful insert, an insert failure prevents the action, and a denial still denies when the insert fails, logging to stdout. Use fake ports. Then implement.
+- [x] 3.3 Write failing tests for the unauthenticated-failure aggregator: at most one line per (client IP, reason) per minute, with a count, driven by a fake Clock. Then implement.
 
 ## 4. Persistence adapter
 
