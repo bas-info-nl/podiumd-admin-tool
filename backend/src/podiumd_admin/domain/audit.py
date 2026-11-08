@@ -173,15 +173,27 @@ def _optional_text(name: str, value: object, limit: int) -> str | None:
     return _truncate(value.strip(), limit) or None
 
 
-def _client_ip(value: object) -> str | None:
-    if value is None:
-        return None
+def normalise_client_ip(value: object) -> str:
+    """Return a client IP address in its normalised text form.
+
+    Raises ``ValueError`` for anything that is not a single IPv4 or IPv6
+    address, so no free text ends up where a client IP belongs.
+    """
     if not isinstance(value, str):
-        raise InvalidAuditEntryError("client_ip must be an IP address in text form")
+        raise ValueError("client_ip must be an IP address in text form")
     try:
         return ipaddress.ip_address(value.strip()).compressed
     except ValueError:
-        raise InvalidAuditEntryError(f"client_ip must be an IP address, got {value!r}") from None
+        raise ValueError(f"client_ip must be an IP address, got {value!r}") from None
+
+
+def _client_ip(value: object) -> str | None:
+    if value is None:
+        return None
+    try:
+        return normalise_client_ip(value)
+    except ValueError as error:
+        raise InvalidAuditEntryError(str(error)) from None
 
 
 def _utc(name: str, value: object) -> datetime:
