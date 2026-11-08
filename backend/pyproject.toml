@@ -109,6 +109,9 @@ addopts = [
   "--cov-report=term-missing",
   "--cov-report=xml",
 ]
+markers = [
+  "integration: needs Docker; runs against a real PostgreSQL via testcontainers (part of the default run)",
+]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 filterwarnings = ["error"]
