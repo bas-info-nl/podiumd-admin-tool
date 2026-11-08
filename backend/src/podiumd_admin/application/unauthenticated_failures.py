@@ -161,6 +161,18 @@ class UnauthenticatedFailureAggregator:
         )
 
     def _write(self, summaries: list[UnauthenticatedFailureSummary]) -> None:
-        """Hand lines to the sink. Call without the lock held."""
+        """Hand lines to the sink. Call without the lock held.
+
+        The windows have already been removed from the table, so a line that
+        fails must not stop the others: every line is attempted, and the first
+        error is raised afterwards so the failure stays visible.
+        """
+        first_error: Exception | None = None
         for summary in summaries:
-            self._sink.unauthenticated_failures(summary)
+            try:
+                self._sink.unauthenticated_failures(summary)
+            except Exception as error:
+                if first_error is None:
+                    first_error = error
+        if first_error is not None:
+            raise first_error

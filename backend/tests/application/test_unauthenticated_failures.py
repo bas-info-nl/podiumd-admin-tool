@@ -411,3 +411,31 @@ def test_default_window_is_one_minute(
     aggregator: UnauthenticatedFailureAggregator,
 ) -> None:
     assert aggregator.window == MINUTE
+
+
+@dataclass
+class _FailOnceSink(FakeAuditSink):
+    """Raises on the first line it is given, then behaves normally."""
+
+    failed: bool = False
+
+    def unauthenticated_failures(self, summary: UnauthenticatedFailureSummary) -> None:
+        if not self.failed:
+            self.failed = True
+            raise OSError("stdout unavailable")
+        super().unauthenticated_failures(summary)
+
+
+def test_a_failing_line_does_not_lose_the_rest_of_the_batch(clock: FakeClock) -> None:
+    sink = _FailOnceSink()
+    aggregator = UnauthenticatedFailureAggregator(sink=sink, clock=clock)
+    aggregator.record(IP, ReasonCode.CALLBACK_ERROR)
+    aggregator.record(OTHER_IP, ReasonCode.INVALID_STATE)
+    aggregator.record(IP, ReasonCode.NO_SESSION)
+    clock.advance(MINUTE)
+
+    with pytest.raises(OSError, match="stdout unavailable"):
+        aggregator.flush()
+
+    # The first line failed, but the other two lines of the batch were still written.
+    assert len(sink.summaries) == 2
