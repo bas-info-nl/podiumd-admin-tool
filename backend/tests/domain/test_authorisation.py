@@ -43,8 +43,8 @@ def _user(role: Role | None) -> User:
 
 
 def test_permissions_have_their_catalogue_names() -> None:
-    assert Permission.AUDIT_LOG_READ == "audit-log:read"
-    assert Permission.SESSION_SIGN_OUT == "session:sign-out"
+    assert Permission.AUDIT_LOG_READ.value == "audit-log:read"
+    assert Permission.SESSION_SIGN_OUT.value == "session:sign-out"
 
 
 def test_this_change_defines_exactly_these_permissions() -> None:
@@ -154,8 +154,8 @@ def test_no_role_takes_precedence_over_missing_permission() -> None:
 
 
 def test_denial_reasons_have_their_audit_codes() -> None:
-    assert DenialReason.NO_ROLE == "no-role"
-    assert DenialReason.MISSING_PERMISSION == "missing-permission"
+    assert DenialReason.NO_ROLE.value == "no-role"
+    assert DenialReason.MISSING_PERMISSION.value == "missing-permission"
 
 
 def test_decisions_name_the_required_permission() -> None:
