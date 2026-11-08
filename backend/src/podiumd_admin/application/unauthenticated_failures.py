@@ -12,14 +12,24 @@ over: when the next failure is recorded, or by ``flush``, which the app calls
 periodically so a final burst is not held back. ``flush_all`` writes every
 open window, for example at shutdown.
 
-Memory is bounded: at most ``max_clients`` keys are tracked separately.
-Failures for further keys are combined per reason into one overflow line
-without a client IP, so a flood from many addresses cannot grow the table.
+Memory is bounded: at most ``max_clients`` distinct client IPs are tracked
+separately, each with at most one window per reason. Failures from further
+client IPs are combined per reason into one overflow line without a client
+IP, so a flood from many addresses cannot grow the table.
+
+Every window has the same length and is opened at the current time, so the
+windows, kept in the order they were opened, are also in the order they end.
+Flushing therefore only looks at the oldest windows and stops at the first
+one that is still open; the cost does not grow with the number of open
+windows. If the clock steps back, a window may be written up to that step
+late, never early. The sink is called after the lock is released, so slow stdout I/O
+does not hold up other callers.
 """
 
 from __future__ import annotations
 
 import threading
+from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Final
@@ -69,8 +79,11 @@ class UnauthenticatedFailureAggregator:
         self._clock = clock
         self._window = window
         self._max_clients = max_clients
-        self._windows: dict[_Key, _Window] = {}
-        self._tracked_clients = 0
+        # Ordered by first_at, so the oldest windows end first.
+        self._windows: OrderedDict[_Key, _Window] = OrderedDict()
+        # Open windows per tracked client IP; its length is the number of
+        # distinct client IPs tracked.
+        self._windows_per_client: dict[str, int] = {}
         self._lock = threading.Lock()
 
     @property
@@ -90,52 +103,64 @@ class UnauthenticatedFailureAggregator:
 
         with self._lock:
             now = self._clock.now()
-            self._flush_ended(now)
+            ended = self._take_ended(now)
             key = self._key_for(address, reason)
             window = self._windows.get(key)
             if window is None:
                 self._windows[key] = _Window(first_at=now, last_at=now)
                 if key[0] is not None:
-                    self._tracked_clients += 1
+                    self._windows_per_client[key[0]] = self._windows_per_client.get(key[0], 0) + 1
             else:
                 window.count += 1
                 window.last_at = now
+        self._write(ended)
 
     def flush(self) -> None:
         """Write a line for every window that is over."""
         with self._lock:
-            self._flush_ended(self._clock.now())
+            ended = self._take_ended(self._clock.now())
+        self._write(ended)
 
     def flush_all(self) -> None:
         """Write a line for every window, including those still open."""
         with self._lock:
-            for key in list(self._windows):
-                self._emit(key)
+            ended = [self._take(key) for key in list(self._windows)]
+        self._write(ended)
 
     def _key_for(self, address: str, reason: ReasonCode) -> _Key:
-        key: _Key = (address, reason)
-        if key in self._windows or self._tracked_clients < self._max_clients:
-            return key
+        if address in self._windows_per_client or len(self._windows_per_client) < self._max_clients:
+            return (address, reason)
         return (None, reason)
 
-    def _flush_ended(self, now: datetime) -> None:
-        ended = [
-            key for key, window in self._windows.items() if now - window.first_at >= self._window
-        ]
-        for key in ended:
-            self._emit(key)
+    def _take_ended(self, now: datetime) -> list[UnauthenticatedFailureSummary]:
+        """Remove the windows that are over, oldest first. Call with the lock held."""
+        ended: list[UnauthenticatedFailureSummary] = []
+        while self._windows:
+            key, window = next(iter(self._windows.items()))
+            if now - window.first_at < self._window:
+                break
+            ended.append(self._take(key))
+        return ended
 
-    def _emit(self, key: _Key) -> None:
+    def _take(self, key: _Key) -> UnauthenticatedFailureSummary:
+        """Remove one window and return its line. Call with the lock held."""
         window = self._windows.pop(key)
         client_ip, reason = key
         if client_ip is not None:
-            self._tracked_clients -= 1
-        self._sink.unauthenticated_failures(
-            UnauthenticatedFailureSummary(
-                client_ip=client_ip,
-                reason=reason,
-                count=window.count,
-                first_at=window.first_at,
-                last_at=window.last_at,
-            )
+            remaining = self._windows_per_client[client_ip] - 1
+            if remaining:
+                self._windows_per_client[client_ip] = remaining
+            else:
+                del self._windows_per_client[client_ip]
+        return UnauthenticatedFailureSummary(
+            client_ip=client_ip,
+            reason=reason,
+            count=window.count,
+            first_at=window.first_at,
+            last_at=window.last_at,
         )
+
+    def _write(self, summaries: list[UnauthenticatedFailureSummary]) -> None:
+        """Hand lines to the sink. Call without the lock held."""
+        for summary in summaries:
+            self._sink.unauthenticated_failures(summary)

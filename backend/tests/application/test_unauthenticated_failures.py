@@ -9,7 +9,10 @@ traffic cannot flood the Audit Log. The tests drive time with a fake Clock.
 from __future__ import annotations
 
 import itertools
+import threading
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from typing import Any, ClassVar, Self
 
 import pytest
 
@@ -240,6 +243,157 @@ def test_tracking_room_is_freed_once_lines_are_written(
     aggregator.flush()
 
     assert [s.client_ip for s in sink.summaries] == [IP, OTHER_IP]
+
+
+def test_max_clients_counts_distinct_client_ips_not_windows(
+    sink: FakeAuditSink, clock: FakeClock
+) -> None:
+    # Two reasons from one client IP are one client; the second client does
+    # not fit and is combined into the overflow line.
+    aggregator = UnauthenticatedFailureAggregator(sink=sink, clock=clock, max_clients=1)
+
+    aggregator.record(IP, ReasonCode.INVALID_STATE)
+    aggregator.record(IP, ReasonCode.NO_SESSION)
+    aggregator.record(OTHER_IP, ReasonCode.NO_SESSION)
+    clock.advance(MINUTE)
+    aggregator.flush()
+
+    assert sorted(((s.client_ip or ""), s.reason.value, s.count) for s in sink.summaries) == [
+        ("", "no-session", 1),
+        (IP, "invalid-state", 1),
+        (IP, "no-session", 1),
+    ]
+
+
+def test_a_client_keeps_its_tracking_room_until_all_its_lines_are_written(
+    sink: FakeAuditSink, clock: FakeClock
+) -> None:
+    aggregator = UnauthenticatedFailureAggregator(sink=sink, clock=clock, max_clients=1)
+    aggregator.record(IP, ReasonCode.INVALID_STATE)
+    clock.advance(timedelta(seconds=30))
+    aggregator.record(IP, ReasonCode.NO_SESSION)
+    clock.advance(timedelta(seconds=30))
+
+    # The first window of IP is written, its second is still open.
+    aggregator.record(OTHER_IP, ReasonCode.CALLBACK_ERROR)
+    clock.advance(timedelta(seconds=30))
+
+    # Now IP has no open windows left, so OTHER_IP fits.
+    aggregator.record(OTHER_IP, ReasonCode.CALLBACK_ERROR)
+    aggregator.flush_all()
+
+    assert [(s.client_ip, s.reason.value) for s in sink.summaries] == [
+        (IP, "invalid-state"),
+        (IP, "no-session"),
+        (None, "callback-error"),
+        (OTHER_IP, "callback-error"),
+    ]
+
+
+@dataclass
+class _BlockingSink(FakeAuditSink):
+    """A sink whose writes block until the test releases them."""
+
+    entered: threading.Event = field(default_factory=threading.Event)
+    release: threading.Event = field(default_factory=threading.Event)
+
+    def unauthenticated_failures(self, summary: UnauthenticatedFailureSummary) -> None:
+        self.entered.set()
+        self.release.wait(timeout=5)
+        super().unauthenticated_failures(summary)
+
+
+@pytest.mark.parametrize("flush_name", ["flush", "flush_all"])
+def test_a_slow_sink_does_not_block_other_callers(clock: FakeClock, flush_name: str) -> None:
+    # The sink is called outside the aggregator's lock, so slow stdout I/O
+    # does not serialise every request that records a failure.
+    sink = _BlockingSink()
+    aggregator = UnauthenticatedFailureAggregator(sink=sink, clock=clock)
+    aggregator.record(IP, ReasonCode.NO_SESSION)
+    clock.advance(MINUTE)
+
+    flusher = threading.Thread(target=getattr(aggregator, flush_name))
+    flusher.start()
+    try:
+        assert sink.entered.wait(timeout=5)
+        recorder = threading.Thread(
+            target=aggregator.record, args=(OTHER_IP, ReasonCode.NO_SESSION)
+        )
+        recorder.start()
+        recorder.join(timeout=2)
+        assert not recorder.is_alive(), "record() waited for the sink"
+    finally:
+        sink.release.set()
+        flusher.join(timeout=5)
+
+    assert [s.client_ip for s in sink.summaries] == [IP]
+
+
+class _CountingInstant(datetime):
+    """A datetime that counts the arithmetic and comparisons done with it."""
+
+    operations: ClassVar[int] = 0
+
+    def _counted(self) -> None:
+        type(self).operations += 1
+
+    def __sub__(self, other: Any) -> Any:
+        self._counted()
+        return super().__sub__(other)
+
+    def __add__(self, other: timedelta) -> Self:
+        self._counted()
+        return super().__add__(other)
+
+    def __lt__(self, other: datetime) -> bool:  # type: ignore[override]
+        self._counted()
+        return super().__lt__(other)
+
+    def __le__(self, other: datetime) -> bool:  # type: ignore[override]
+        self._counted()
+        return super().__le__(other)
+
+    def __gt__(self, other: datetime) -> bool:  # type: ignore[override]
+        self._counted()
+        return super().__gt__(other)
+
+    def __ge__(self, other: datetime) -> bool:  # type: ignore[override]
+        self._counted()
+        return super().__ge__(other)
+
+
+def test_recording_does_not_inspect_windows_that_are_still_open(sink: FakeAuditSink) -> None:
+    # Only windows that have just ended are processed, so the cost of a
+    # record() or flush() does not grow with the number of open windows.
+    clock = FakeClock(_CountingInstant.fromtimestamp(START.timestamp(), tz=UTC))
+    aggregator = UnauthenticatedFailureAggregator(sink=sink, clock=clock, max_clients=5_000)
+    for host in range(2_000):
+        aggregator.record(f"10.0.{host // 256}.{host % 256}", ReasonCode.NO_SESSION)
+    clock.current = _CountingInstant.fromtimestamp((START + MINUTE / 2).timestamp(), tz=UTC)
+
+    _CountingInstant.operations = 0
+    aggregator.record(IP, ReasonCode.NO_SESSION)
+    aggregator.flush()
+
+    assert sink.summaries == []
+    assert _CountingInstant.operations <= 10
+
+
+def test_only_ended_windows_are_written_among_many_open_ones(
+    sink: FakeAuditSink, clock: FakeClock
+) -> None:
+    aggregator = UnauthenticatedFailureAggregator(sink=sink, clock=clock)
+    # 120 windows, one every half second, all within the first minute.
+    for host in range(120):
+        aggregator.record(f"192.0.2.{host}", ReasonCode.NO_SESSION)
+        clock.advance(timedelta(milliseconds=500))
+    assert sink.summaries == []
+
+    # Windows that started at or before START + 20s are over.
+    clock.current = START + MINUTE + timedelta(seconds=20)
+    aggregator.flush()
+
+    assert [s.client_ip for s in sink.summaries] == [f"192.0.2.{n}" for n in range(41)]
 
 
 @pytest.mark.parametrize("window", [timedelta(0), timedelta(seconds=-1)])
