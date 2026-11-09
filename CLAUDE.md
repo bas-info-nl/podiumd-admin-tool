@@ -32,6 +32,23 @@ Guidance for AI coding agents (and humans) working in this repository.
   comment explaining why.
 - **Git.** `main` is protected and only accepts PRs. Work on a feature branch.
 
+## Team workflow (agents)
+
+Work is done by three agent roles, defined in [.claude/agents/](.claude/agents/):
+
+| Role                                                   | Does                                                                                                                                                                              | Never                          |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| [task-manager](.claude/agents/task-manager.md)         | Creates the branch from `origin/main`, briefs the developer, pushes, opens the PR, waits for CI and the Copilot review, replies to and resolves threads, files `follow-up` issues | writes production code, merges |
+| [senior-developer](.claude/agents/senior-developer.md) | Implements tasks and review fixes test-first, runs every check, commits locally                                                                                                   | pushes, touches GitHub         |
+| [code-reviewer](.claude/agents/code-reviewer.md)       | Re-runs every check itself, reviews against tasks, design, specs and ADRs, triages Copilot comments (fix, follow-up or decline)                                                   | edits code                     |
+
+The saved workflow [.claude/workflows/implement-task-group.js](.claude/workflows/implement-task-group.js) runs them end to end. It works in two modes:
+
+- `{ mode: "implement", change, group, tasks, branch }` implements a task group and opens a PR;
+- `{ mode: "review", pr, branch }` handles the CI and Copilot feedback on an existing PR.
+
+**Copilot reviews are handled proactively.** The organisation's Copilot reviewer comments within minutes of a PR being opened or pushed. The code-reviewer triages every finding, and fixes go back to the senior-developer. The task-manager pushes, replies, resolves and asks Copilot to review again, until a review has no new actionable findings (at most 3 rounds). Unresolved threads block merging. Only the user merges, after reviewing.
+
 ## Commands
 
 Backend (in `backend/`):
