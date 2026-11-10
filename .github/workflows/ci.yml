@@ -18,9 +18,42 @@ env:
   PRE_COMMIT_VERSION: "4.7.0"
   FORCE_COLOR: "1"
 
+# Path gate. On pull requests, `backend` and `frontend` only run when the PR
+# touches their area; `changes` decides that with .github/scripts/changed-areas.sh,
+# which also documents the area mapping. Push to main and workflow_dispatch
+# always run everything, and `hygiene` runs on every event because gitleaks,
+# actionlint and pre-commit cover all files.
+#
+# `on.pull_request.paths` is deliberately not used: backend, frontend and
+# hygiene are required status checks on main, and a workflow that does not start
+# never reports them, so the PR waits on "Expected" forever. A job skipped by a
+# job-level `if:` reports as skipped, which satisfies a required check.
+#
+# The gated jobs run unless `changes` explicitly answered "false", so a failing
+# `changes` job runs the checks instead of silently skipping them.
 jobs:
+  changes:
+    name: changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      backend: ${{ steps.areas.outputs.backend }}
+      frontend: ${{ steps.areas.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The PR merge commit and its first parent (the base branch tip).
+          fetch-depth: 2
+
+      - name: Detect changed areas
+        id: areas
+        run: .github/scripts/changed-areas.sh
+
   backend:
     name: backend
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.backend != 'false' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
@@ -76,6 +109,8 @@ jobs:
 
   frontend:
     name: frontend
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.frontend != 'false' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
