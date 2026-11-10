@@ -14,7 +14,11 @@ its entries can be committed, even when the caller swallows the error (as
 ``AuditRecorder.record_denial`` does for a failed insert). The commit then
 raises nothing but rolls back. So before the commit the hook reads the
 transaction status from the driver, and writes nothing for an aborted
-transaction. Savepoints are not supported: an entry inserted under a
+transaction. The transaction belongs to ``audited_transaction``: a caller that
+ends it inside the block (``connection.rollback()`` or ``connection.commit()``)
+gets a ``RuntimeError`` and nothing is written, because after an explicit
+rollback the driver reports an idle connection, not an aborted transaction.
+Savepoints are not supported: an entry inserted under a
 savepoint that is later rolled back would still be written.
 """
 
@@ -76,6 +80,10 @@ async def audited_transaction(
     async with engine.begin() as connection:
         repository = _RememberingAuditRepository(SqlAuditRepository(connection))
         yield AuditedTransaction(connection=connection, audit_repository=repository)
+        if not connection.in_transaction():
+            raise RuntimeError(
+                "audited_transaction owns the transaction; do not end it inside the block"
+            )
         # The commit of an aborted transaction raises nothing but rolls back.
         aborted = await _is_aborted(connection)
     if aborted:

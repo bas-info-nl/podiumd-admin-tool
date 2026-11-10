@@ -214,3 +214,23 @@ async def test_no_entry_is_written_when_a_swallowed_action_failure_aborted_the_t
 
     assert sink.stored == []
     assert not await _stored(app_engine, entry)
+
+
+async def test_ending_the_owned_transaction_inside_the_block_is_refused_and_writes_nothing(
+    app_engine: AsyncEngine,
+) -> None:
+    # After an explicit rollback the driver reports IDLE, not INERROR, so the
+    # abort check alone would write an entry that was never stored.
+    sink = FakeAuditSink()
+    entry = _entry()
+
+    async def roll_back_inside() -> None:
+        async with audited_transaction(app_engine, sink) as transaction:
+            await transaction.audit_repository.add(entry)
+            await transaction.connection.rollback()
+
+    with pytest.raises(RuntimeError, match="owns the transaction"):
+        await roll_back_inside()
+
+    assert sink.stored == []
+    assert not await _stored(app_engine, entry)
