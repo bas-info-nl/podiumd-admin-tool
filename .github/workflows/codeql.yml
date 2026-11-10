@@ -16,6 +16,18 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Path gate. On pull requests each matrix leg only analyses when the PR touches
+# its language; .github/scripts/changed-areas.sh decides that and documents the
+# mapping. Push to main, the weekly schedule and workflow_dispatch always
+# analyse both languages.
+#
+# `on.pull_request.paths` is deliberately not used: "CodeQL (python)" and
+# "CodeQL (javascript-typescript)" are required status checks on main, and a
+# workflow that does not start never reports them. A job-level `if:` is not used
+# either: it is evaluated before the matrix expands, so a skipped leg could
+# report under the unexpanded name and never satisfy the required check.
+# Instead every leg always runs, reports its expanded name, and guards the
+# CodeQL steps with a step-level `if:`, so an irrelevant leg passes in seconds.
 jobs:
   analyze:
     name: CodeQL (${{ matrix.language }})
@@ -33,13 +45,27 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # The PR merge commit and its first parent (the base branch tip).
+          fetch-depth: 2
+
+      - name: Detect changed areas
+        id: areas
+        run: .github/scripts/changed-areas.sh
+
+      - name: Skip analysis (no ${{ matrix.language }} changes)
+        if: ${{ steps.areas.outputs[format('codeql-{0}', matrix.language)] == 'false' }}
+        env:
+          LANGUAGE: ${{ matrix.language }}
+        run: echo "This pull request changes no $LANGUAGE files; CodeQL analysis skipped."
 
       - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        if: ${{ steps.areas.outputs[format('codeql-{0}', matrix.language)] != 'false' }}
         with:
           languages: ${{ matrix.language }}
           build-mode: none
           queries: security-extended
 
       - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        if: ${{ steps.areas.outputs[format('codeql-{0}', matrix.language)] != 'false' }}
         with:
           category: /language:${{ matrix.language }}
