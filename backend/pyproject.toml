@@ -26,6 +26,7 @@ dev = [
     "import-linter>=2.16",
     "mypy>=2.4.1",
     "pip-audit>=2.10.1",
+    "pre-commit>=4.7.0",
     "pytest>=9.2.0",
     "pytest-asyncio>=1.4.1.post1",
     "pytest-cov>=7.1.0",
@@ -34,6 +35,12 @@ dev = [
 ]
 
 # --- Quality tools -----------------------------------------------------------
+
+[tool.uv]
+# The one uv version for local development and CI: uv refuses to run this
+# project with any other version, and astral-sh/setup-uv installs it in CI
+# (version-file: backend/pyproject.toml). Bump it here only.
+required-version = "==0.13.7"
 
 [tool.ruff]
 target-version = "py312"

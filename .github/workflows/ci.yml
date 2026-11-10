@@ -13,9 +13,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Tool versions are not set here: uv comes from backend/pyproject.toml
+# ([tool.uv] required-version), Python from backend/.python-version, Node from
+# .nvmrc, pre-commit from backend/uv.lock and the hook tools from
+# .pre-commit-config.yaml. Local development reads the same files.
 env:
-  UV_VERSION: "0.13.7"
-  PRE_COMMIT_VERSION: "4.7.0"
   FORCE_COLOR: "1"
 
 # Path gate. On pull requests, `backend` and `frontend` only run when the PR
@@ -66,7 +68,7 @@ jobs:
 
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          version: ${{ env.UV_VERSION }}
+          version-file: backend/pyproject.toml
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
 
@@ -173,21 +175,16 @@ jobs:
           # gitleaks scans the full history.
           fetch-depth: 0
 
-      - name: gitleaks
-        run: >-
-          docker run --rm -v "$GITHUB_WORKSPACE:/repo:ro"
-          ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
-          git --redact --verbose /repo
-
       # Tests the path gate here rather than in `changes`: hygiene is a required
       # check, so a broken gate blocks the merge instead of only failing open.
       - name: Test the path gate (changed-areas.sh)
         run: .github/scripts/test-changed-areas.sh
 
-      # The ruff, prettier and eslint hooks use the locked backend and frontend tools.
+      # pre-commit is locked in backend/uv.lock, and the ruff, prettier and
+      # eslint hooks use the locked backend and frontend tools.
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          version: ${{ env.UV_VERSION }}
+          version-file: backend/pyproject.toml
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
 
@@ -205,17 +202,23 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/pre-commit
-          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+          # Python hook environments are built with the locked pre-commit and
+          # the backend's Python, so those are part of the key too.
+          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml', 'backend/uv.lock', 'backend/.python-version') }}
+
+      # The gitleaks version is the hook rev in .pre-commit-config.yaml.
+      - name: gitleaks (full history)
+        run: uv run --project backend --locked pre-commit run gitleaks-history --hook-stage manual
 
       - name: actionlint
-        run: uvx "pre-commit@$PRE_COMMIT_VERSION" run actionlint --all-files
+        run: uv run --project backend --locked pre-commit run actionlint --all-files
 
       - name: hadolint
         if: ${{ hashFiles('**/Dockerfile', '**/*.Dockerfile') != '' }}
-        run: uvx "pre-commit@$PRE_COMMIT_VERSION" run hadolint --all-files
+        run: uv run --project backend --locked pre-commit run hadolint --all-files
 
       - name: pre-commit run --all-files
         env:
           # Already run above; the gitleaks hook only scans staged changes.
           SKIP: actionlint,hadolint,gitleaks
-        run: uvx "pre-commit@$PRE_COMMIT_VERSION" run --all-files --show-diff-on-failure
+        run: uv run --project backend --locked pre-commit run --all-files --show-diff-on-failure
