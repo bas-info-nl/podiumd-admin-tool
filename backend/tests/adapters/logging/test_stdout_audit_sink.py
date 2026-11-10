@@ -336,6 +336,56 @@ def test_the_log_level_filters_a_child_logger_with_its_own_level(stream: io.Stri
     assert [line["event"] for line in _lines(stream)] == ["shown"]
 
 
+@pytest.fixture
+def uvicorn_own_handlers() -> Iterator[io.StringIO]:
+    """Give the uvicorn loggers their own non-propagating handler, as uvicorn's
+    default dictConfig does, and put their old state back afterwards."""
+    names = ("uvicorn", "uvicorn.error", "uvicorn.access")
+    saved = {}
+    own = io.StringIO()
+    for name in names:
+        lg = logging.getLogger(name)
+        saved[name] = (lg.handlers[:], lg.propagate, lg.level)
+        lg.handlers[:] = [logging.StreamHandler(own)]
+        lg.propagate = False
+        # uvicorn uses INFO; DEBUG here makes the handler threshold the filter.
+        lg.setLevel(logging.DEBUG)
+    yield own
+    for name, (handlers, propagate, level) in saved.items():
+        lg = logging.getLogger(name)
+        lg.handlers[:] = handlers
+        lg.propagate = propagate
+        lg.setLevel(level)
+
+
+def test_uvicorn_logs_go_through_the_json_handler(
+    stream: io.StringIO, uvicorn_own_handlers: io.StringIO
+) -> None:
+    configure_logging(stream=stream, level=logging.INFO)
+
+    logging.getLogger("uvicorn.error").info("Started server process")
+    logging.getLogger("uvicorn.access").info("GET /healthz 200")
+
+    lines = _lines(stream)
+    assert [(line["logger"], line["event"]) for line in lines] == [
+        ("uvicorn.error", "Started server process"),
+        ("uvicorn.access", "GET /healthz 200"),
+    ]
+    assert all(line["log_type"] == "app" for line in lines)
+    assert uvicorn_own_handlers.getvalue() == ""
+
+
+def test_the_log_level_filters_uvicorn_logs(
+    stream: io.StringIO, uvicorn_own_handlers: io.StringIO
+) -> None:
+    configure_logging(stream=stream, level=logging.INFO)
+
+    logging.getLogger("uvicorn.access").debug("hidden")
+
+    assert _lines(stream) == []
+    assert uvicorn_own_handlers.getvalue() == ""
+
+
 def test_audit_lines_are_written_at_a_warning_threshold(
     sink: StdoutAuditSink, stream: io.StringIO
 ) -> None:

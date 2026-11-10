@@ -1,10 +1,11 @@
 """JSON logs on stdout for ordinary application logging (ADR 0008).
 
 structlog loggers and standard library loggers (uvicorn, SQLAlchemy, ...) go
-through one handler and come out as one JSON object per line. Every ordinary
-line gets ``log_type: "app"``, set last, so no caller can make an ordinary
-line look like an audit line: neither by passing ``log_type="audit"``, nor by
-binding it, nor through context variables.
+through one handler and come out as one JSON object per line. uvicorn's own
+handlers are removed and its loggers set to propagate, so its lines take the
+same route. Every ordinary line gets ``log_type: "app"``, set last, so no
+caller can make an ordinary line look like an audit line: neither by passing
+``log_type="audit"``, nor by binding it, nor through context variables.
 """
 
 from __future__ import annotations
@@ -17,6 +18,10 @@ import structlog
 from structlog.typing import EventDict, Processor, WrappedLogger
 
 ORDINARY_LOG_TYPE: Final = "app"
+
+# uvicorn's default dictConfig gives these loggers their own plain-text
+# handlers with propagate=False, which would bypass the JSON handler.
+_UVICORN_LOGGERS: Final = ("uvicorn", "uvicorn.error", "uvicorn.access")
 
 
 def _mark_ordinary(_logger: WrappedLogger, _method: str, event_dict: EventDict) -> EventDict:
@@ -65,3 +70,7 @@ def configure_logging(*, stream: TextIO | None = None, level: int = logging.INFO
     # propagated record from a child with its own level (uvicorn's) reaches the
     # handler anyway. The StdoutAuditSink does not write through this handler.
     handler.setLevel(level)
+    for name in _UVICORN_LOGGERS:
+        uvicorn_logger = logging.getLogger(name)
+        uvicorn_logger.handlers.clear()
+        uvicorn_logger.propagate = True
