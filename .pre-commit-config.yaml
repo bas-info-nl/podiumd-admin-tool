@@ -1,10 +1,10 @@
 # pre-commit itself is a backend dev dependency, so its version is locked in
 # backend/uv.lock and CI and local runs use the same one:
-#   uv run --project backend pre-commit install         (once, see README.md)
-#   uv run --project backend pre-commit run --all-files
+#   uv run --project backend --locked pre-commit install  (once, see README.md)
+#   uv run --project backend --locked pre-commit run --all-files
 # Hook repositories are pinned to commit SHAs; this file is the only place that
 # sets the gitleaks, actionlint, hadolint and shellcheck versions, also for CI.
-# Update with `uv run --project backend pre-commit autoupdate --freeze`.
+# Update with `uv run --project backend --locked pre-commit autoupdate --freeze`.
 #
 # The ruff, prettier and eslint hooks run the versions locked in backend/uv.lock
 # and frontend/package-lock.json, so local hooks and CI never disagree. They

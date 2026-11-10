@@ -55,28 +55,33 @@ npm test
 ### Tool versions
 
 Every tool version is set in exactly one file in this repository, and CI and
-local development read that same file. Do not repeat a version in a workflow or
-a doc; change the file in the table instead.
+local development read that same file. Versions are exact (patch level), so
+"works on my machine" and CI run the same tools. Do not repeat a version in a
+workflow or a doc; change the file in the table instead.
 
-| Tool                                       | Single source                                            | Read by CI                            | Locally                                                                                             |
-| ------------------------------------------ | -------------------------------------------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| uv                                         | `[tool.uv] required-version` in `backend/pyproject.toml` | `setup-uv` `version-file`             | uv refuses to run the project with another version; `uv self update <version>` or `brew upgrade uv` |
-| Python                                     | `backend/.python-version`                                | uv (`uv sync` in `backend/`)          | uv installs and uses it automatically                                                               |
-| Node.js (and its bundled npm)              | `.nvmrc`                                                 | `setup-node` `node-version-file`      | `nvm use` (or fnm); `engine-strict` makes `npm ci` refuse another major version                     |
-| pre-commit                                 | `backend/uv.lock` (backend dev dependency)               | `uv run --project backend pre-commit` | `uv run --project backend pre-commit ...`                                                           |
-| gitleaks, actionlint, hadolint, shellcheck | hook `rev` in `.pre-commit-config.yaml`                  | through pre-commit                    | through pre-commit                                                                                  |
-| ruff, mypy, eslint, prettier, ...          | `backend/uv.lock`, `frontend/package-lock.json`          | `uv sync --locked`, `npm ci`          | `uv sync`, `npm ci`                                                                                 |
+| Tool                                       | Single source                                            | Read by CI                                     | Locally                                                                                             |
+| ------------------------------------------ | -------------------------------------------------------- | ---------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| uv                                         | `[tool.uv] required-version` in `backend/pyproject.toml` | `setup-uv` `version-file`                      | uv refuses to run the project with another version; `uv self update <version>` or `brew upgrade uv` |
+| Python                                     | `backend/.python-version`                                | uv (`uv sync` in `backend/`)                   | uv installs and uses it automatically (`uv python install` in `backend/`)                           |
+| Node.js (and its bundled npm)              | `.nvmrc`                                                 | `setup-node` `node-version-file`               | `nvm install` / `nvm use` (or fnm); npm warns (`EBADENGINE`) on another version                     |
+| pre-commit                                 | `backend/uv.lock` (backend dev dependency)               | `uv run --project backend --locked pre-commit` | `uv run --project backend --locked pre-commit ...`                                                  |
+| gitleaks, actionlint, hadolint, shellcheck | hook `rev` in `.pre-commit-config.yaml`                  | through pre-commit                             | through pre-commit                                                                                  |
+| ruff, mypy, eslint, prettier, ...          | `backend/uv.lock`, `frontend/package-lock.json`          | `uv sync --locked`, `npm ci`                   | `uv sync`, `npm ci`                                                                                 |
 
-`package.json` `engines` repeats the `.nvmrc` major version because npm cannot
-read `.nvmrc`; a pre-commit hook (`.github/scripts/check-node-engines.sh`) fails
-when the two disagree.
+The uv pin is exact and Dependabot does not bump it: when Dependabot reports a
+uv version mismatch, bump `required-version` by hand in a PR.
 
-`requires-python`, ruff `target-version` and mypy `python_version` in
-`backend/pyproject.toml` describe the Python language level, not the
-interpreter; keep them in line with `backend/.python-version` (not checked
-automatically; `requires-python` makes uv reject a `.python-version` outside it). One known gap: actionlint
-runs shellcheck on `run:` scripts with whichever `shellcheck` is on `PATH`, so
-that shellcheck version can differ between your machine and the CI runner.
+`package.json` `engines` (and the root entry in each `package-lock.json`)
+repeats `.nvmrc` as `^<version>` because npm cannot read `.nvmrc`; a pre-commit
+hook (`.github/scripts/check-node-engines.sh`) fails when they disagree. npm
+only warns on a mismatch: `engine-strict` is not set, because Dependabot's npm
+updater runs an older Node.js and would fail every update. CI always installs
+exactly `.nvmrc`.
+
+The Python language level comes from `requires-python` in
+`backend/pyproject.toml`: ruff infers its target from it, and mypy checks
+against the interpreter, which is the one in `backend/.python-version`. uv
+rejects a `.python-version` outside `requires-python`.
 
 After a version bump, update locally with `uv self update <version>` (or
 `brew upgrade uv`), `nvm install` in the repository root, and `uv sync` and
@@ -115,25 +120,25 @@ frontend, so install those first. Then install the hooks once per clone:
 
 ```sh
 (cd backend && uv sync) && (cd frontend && npm ci)
-uv run --project backend pre-commit install
+uv run --project backend --locked pre-commit install
 ```
 
 Run all hooks against the whole repository with
-`uv run --project backend pre-commit run --all-files`. CI runs the same command
-with the same pre-commit version, so a green local run means a green `hygiene`
-job. The full-history gitleaks scan that CI also runs is
-`uv run --project backend pre-commit run gitleaks-history --hook-stage manual`.
+`uv run --project backend --locked pre-commit run --all-files`. CI runs the
+same command with the same pre-commit version, so a green local run means a
+green `hygiene` job. The full-history gitleaks scan that CI also runs is
+`uv run --project backend --locked pre-commit run gitleaks-history --hook-stage manual`.
 
 ### Quality gates
 
 CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs these checks on
 pull requests and on `main`; run them locally before you push.
 
-| Area     | Commands                                                                                                                               |
-| -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Backend  | `uv run ruff check .`, `uv run ruff format --check .`, `uv run mypy`, `uv run lint-imports`, `uv run pytest`, coverage gate, pip-audit |
-| Frontend | `npm run lint`, `npm run format:check`, `npm run typecheck`, `npm run test:coverage`, `npm audit`                                      |
-| Hygiene  | `uv run --project backend pre-commit run --all-files`, gitleaks over the full history, actionlint, hadolint, the path gate tests       |
+| Area     | Commands                                                                                                                                  |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Backend  | `uv run ruff check .`, `uv run ruff format --check .`, `uv run mypy`, `uv run lint-imports`, `uv run pytest`, coverage gate, pip-audit    |
+| Frontend | `npm run lint`, `npm run format:check`, `npm run typecheck`, `npm run test:coverage`, `npm audit`                                         |
+| Hygiene  | `uv run --project backend --locked pre-commit run --all-files`, gitleaks over the full history, actionlint, hadolint, the path gate tests |
 
 CodeQL ([.github/workflows/codeql.yml](.github/workflows/codeql.yml)) analyses
 Python and TypeScript on every pull request, on `main` and weekly. Dependabot
