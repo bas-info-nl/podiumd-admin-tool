@@ -25,13 +25,20 @@ class FakeAuditRepository:
 
 @dataclass
 class FakeAuditSink:
-    """Collects what would be written to stdout."""
+    """Collects what would be written to stdout; can be told to fail the failure report."""
 
+    stored: list[AuditEntry] = field(default_factory=list)
     write_failures: list[tuple[AuditEntry, Exception]] = field(default_factory=list)
     summaries: list[UnauthenticatedFailureSummary] = field(default_factory=list)
+    report_error: Exception | None = None
+
+    def entry_stored(self, entry: AuditEntry) -> None:
+        self.stored.append(entry)
 
     def audit_write_failed(self, entry: AuditEntry, error: Exception) -> None:
         self.write_failures.append((entry, error))
+        if self.report_error is not None:
+            raise self.report_error
 
     def unauthenticated_failures(self, summary: UnauthenticatedFailureSummary) -> None:
         self.summaries.append(summary)
