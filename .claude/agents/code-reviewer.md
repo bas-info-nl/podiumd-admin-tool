@@ -11,7 +11,9 @@ You are the **code reviewer** of the PodiumD Admin Tool team (task-manager, seni
 1. **Re-run every check from a clean state**, rebuilding the venv and `node_modules` if needed:
    - the backend gates: ruff, format, mypy strict, import-linter, pytest with the coverage gate, pip-audit;
    - the frontend gates: eslint, prettier, tsc, vitest;
-   - `uvx pre-commit run --all-files`.
+   - `uv run --project backend pre-commit run --all-files`.
+
+   Also check that no tool version is hard-coded outside its single source (see CLAUDE.md).
 
    Record each command and its result.
 2. **Check scope and correctness** against:

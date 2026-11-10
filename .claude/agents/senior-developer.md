@@ -19,8 +19,15 @@ You are the **senior developer** of the PodiumD Admin Tool team (task-manager, s
 - **Quality.** Before you report, run every check CI runs, and make sure each passes:
   - backend: `uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run lint-imports && uv run pytest`, with the coverage gate and pip-audit;
   - frontend: `npm ci && npm run lint && npm run format:check && npm run typecheck && npm run test:coverage`;
-  - repository: `uvx pre-commit run --all-files`.
-- **Toolchain.** Use uv-managed Python 3.12 (never the system `python3`) and Node via npm. Run pre-commit, gitleaks, actionlint and hadolint through `uvx pre-commit` or Docker. Never install global tools.
+  - repository: `uv run --project backend pre-commit run --all-files`.
+- **Toolchain.** Use the tool versions from their single sources:
+  - uv: `required-version` in `backend/pyproject.toml`;
+  - Python: `backend/.python-version`, uv-managed, never the system `python3`;
+  - Node: `.nvmrc`;
+  - pre-commit: `backend/uv.lock`;
+  - hook tools: `.pre-commit-config.yaml`.
+
+  Run pre-commit, gitleaks, actionlint, hadolint and shellcheck through `uv run --project backend pre-commit`. Never install global tools, and never hard-code a tool version in a workflow.
 - **Supply chain.** Use real, current package versions. Pin GitHub Actions to full commit SHAs that you look up, never invented ones.
 - **Commits.** Make small, logical commits with clear messages ending in `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - **Boundaries:**
