@@ -46,8 +46,16 @@ const REVIEW = { type: 'object', properties: {
   suggestions: { type: 'array', items: { type: 'string' } },
   summary: { type: 'string' },
 }, required: ['approved', 'checksRun', 'blocking', 'suggestions', 'summary'] }
+const DELIVERY = { type: 'object', properties: {
+  created: { type: 'boolean', description: 'true only if gh pr create succeeded (or an open PR for this exact branch already exists)' },
+  pr: { type: 'integer', description: 'the PR number; 0 when created is false' },
+  url: { type: 'string' },
+  headRefName: { type: 'string', description: "from 'gh pr view <pr> --json headRefName'" },
+  error: { type: 'string', description: 'what went wrong when created is false' },
+}, required: ['created', 'pr', 'url', 'headRefName'] }
 const FEEDBACK = { type: 'object', properties: {
   pr: { type: 'integer' },
+  headRefName: { type: 'string', description: "from 'gh pr view <pr> --json headRefName'" },
   headSha: { type: 'string' },
   ciPassed: { type: 'boolean' },
   ciSummary: { type: 'string' },
@@ -57,7 +65,7 @@ const FEEDBACK = { type: 'object', properties: {
     kind: { type: 'string', enum: ['thread', 'body'] },
     path: { type: 'string' }, line: { type: 'integer' }, body: { type: 'string' },
   }, required: ['id', 'kind', 'path', 'body'] } },
-}, required: ['pr', 'headSha', 'ciPassed', 'ciSummary', 'copilotReviewed', 'findings'] }
+}, required: ['pr', 'headRefName', 'headSha', 'ciPassed', 'ciSummary', 'copilotReviewed', 'findings'] }
 const TRIAGE = { type: 'object', properties: {
   decisions: { type: 'array', items: { type: 'object', properties: {
     id: { type: 'string' },
@@ -124,10 +132,13 @@ if (MODE === 'implement') {
   result.implementation = { approved: built.review.approved, rounds: built.history.length, review: built.review, dev: built.dev }
 
   phase('Deliver')
-  const delivered = await agent(`${role('task-manager')}\n${CTX}\nDeliver task group ${GROUP} (tasks ${TASKS}) of change ${CHANGE}. Reviewer approved: ${built.review.approved}. Review history: ${JSON.stringify(built.history)}. Final review: ${JSON.stringify(built.review)}. Developer report: ${JSON.stringify(built.dev)}.${A.extra ? '\nExtra instructions: ' + A.extra : ''}\nTick the completed tasks, push ${BRANCH}, open the PR (draft if not approved). Do not wait for CI or Copilot yet and do not switch back to main yet — the Copilot phase follows. Return ONLY the PR number as digits.`,
-    { label: 'task-manager:deliver', phase: 'Deliver' })
-  pr = parseInt(String(delivered || '').match(/\d+/)?.[0] || '', 10)
-  if (!pr) throw new Error('task-manager did not return a PR number: ' + delivered)
+  const delivered = await agent(`${role('task-manager')}\n${CTX}\nDeliver task group ${GROUP} (tasks ${TASKS}) of change ${CHANGE}. Reviewer approved: ${built.review.approved}. Review history: ${JSON.stringify(built.history)}. Final review: ${JSON.stringify(built.review)}. Developer report: ${JSON.stringify(built.dev)}.${A.extra ? '\nExtra instructions: ' + A.extra : ''}\nTick the completed tasks, push ${BRANCH}, open the PR (draft if not approved). Do not wait for CI or Copilot yet and do not switch back to main yet — the Copilot phase follows. After creating the PR, run 'gh pr view <number> --json headRefName,url' and report exactly what it returns. If anything failed, set created=false and explain in error; never guess a PR number.`,
+    { label: 'task-manager:deliver', phase: 'Deliver', schema: DELIVERY })
+  if (!delivered || delivered.created !== true) throw new Error('task-manager did not create the PR: ' + (delivered ? delivered.error || 'no error given' : 'no result'))
+  if (!Number.isInteger(delivered.pr) || delivered.pr <= 0) throw new Error('task-manager returned an invalid PR number: ' + JSON.stringify(delivered))
+  if (delivered.headRefName !== BRANCH) throw new Error(`PR #${delivered.pr} is for branch ${delivered.headRefName}, not ${BRANCH}; refusing to continue`)
+  pr = delivered.pr
+  result.prUrl = delivered.url
   log(`PR #${pr} opened`)
 }
 result.pr = pr
@@ -146,6 +157,7 @@ const collect = async label => {
   const fb = await agent(`${role('task-manager')}\n${CTX}\nPR #${pr}. Make sure the local checkout is on ${BRANCH} and up to date with origin. Wait (poll every ~30s, at most ~15 minutes) until (a) the required checks have finished and (b) the Copilot review of the current head SHA has been submitted (see "Copilot reviews" in your role). Then return the CI result and every Copilot finding that still needs handling: all UNRESOLVED review threads, plus review-body findings (e.g. "previously missed issues") that are not in this already-handled list: ${JSON.stringify(handled)}. Do not change anything.`,
     { label, phase: 'Copilot', schema: FEEDBACK })
   if (!fb) throw new Error('task-manager failed to collect feedback')
+  if (fb.pr !== pr || fb.headRefName !== BRANCH) throw new Error(`PR #${fb.pr} is for branch ${fb.headRefName}, expected #${pr} on ${BRANCH}; refusing to touch it`)
   pushedSinceCollect = false
   lastCiPassed = fb.ciPassed
   // Recompute on every collection: a later review of a newer head overrides
