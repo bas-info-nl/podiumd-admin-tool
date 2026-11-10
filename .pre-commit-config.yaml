@@ -1,10 +1,16 @@
-# Install once with `uvx pre-commit install` (see README.md).
-# Hook repositories are pinned to commit SHAs; update with
-# `uvx pre-commit autoupdate --freeze`.
+# pre-commit itself is a backend dev dependency, so its version is locked in
+# backend/uv.lock and CI and local runs use the same one:
+#   uv run --project backend --locked pre-commit install  (once, see README.md)
+#   uv run --project backend --locked pre-commit run --all-files
+# Hook repositories are pinned to commit SHAs; this file is the only place that
+# sets the gitleaks, actionlint, hadolint and shellcheck versions, also for CI.
+# Update with `uv run --project backend --locked pre-commit autoupdate --freeze`.
 #
 # The ruff, prettier and eslint hooks run the versions locked in backend/uv.lock
 # and frontend/package-lock.json, so local hooks and CI never disagree. They
 # need `uv` and `npm ci` in frontend/ first.
+#
+# A floor for config compatibility only; the version used is the locked one.
 minimum_pre_commit_version: "3.2.0"
 default_install_hook_types: [pre-commit]
 # .claude/ is Claude Code configuration; LICENSE is kept verbatim.
@@ -54,11 +60,25 @@ repos:
         language: system
         files: ^frontend/.*\.(js|jsx|ts|tsx)$
         require_serial: true
+      - id: node-engines
+        name: package.json engines match .nvmrc
+        entry: .github/scripts/check-node-engines.sh
+        language: system
+        files: ^(\.nvmrc|(frontend|e2e)/package(-lock)?\.json)$
+        pass_filenames: false
 
   - repo: https://github.com/gitleaks/gitleaks
     rev: 83d9cd684c87d95d656c1458ef04895a7f1cbd8e # frozen: v8.30.1
     hooks:
       - id: gitleaks
+      # The same gitleaks over the full git history, for the hygiene job:
+      #   pre-commit run gitleaks-history --hook-stage manual
+      - id: gitleaks
+        alias: gitleaks-history
+        name: gitleaks (full history)
+        entry: gitleaks git --redact --verbose
+        always_run: true
+        stages: [manual]
 
   - repo: https://github.com/AleksaC/hadolint-py
     rev: 6e7504451511eaeb62a3e7f14d63b0296cbf86eb # frozen: v2.15.1
@@ -69,3 +89,8 @@ repos:
     rev: 914e7df21a07ef503a81201c76d2b11c789d3fca # frozen: v1.7.12
     hooks:
       - id: actionlint
+
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: a6564f5d57444e123433a5c9af733e3975c77229 # frozen: v0.11.0.1-1
+    hooks:
+      - id: shellcheck

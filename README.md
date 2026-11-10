@@ -31,8 +31,8 @@ and keeps an append-only Audit Log of every attempted action.
 
 ## Development
 
-Prerequisites: [uv](https://docs.astral.sh/uv/) and Node.js 22.22 or later
-(with npm). uv installs Python 3.12 for the backend.
+Prerequisites: [uv](https://docs.astral.sh/uv/) and Node.js with npm, in the
+versions below. uv installs Python for the backend.
 
 ```sh
 # Backend
@@ -51,6 +51,45 @@ npm ci
 npx playwright install chromium
 npm test
 ```
+
+### Tool versions
+
+Every tool version is set in exactly one file in this repository, and CI and
+local development read that same file. Versions are exact (patch level), so
+"works on my machine" and CI run the same tools. Do not repeat a version in a
+workflow or a doc; change the file in the table instead.
+
+| Tool                                       | Single source                                            | Read by CI                                     | Locally                                                                                             |
+| ------------------------------------------ | -------------------------------------------------------- | ---------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| uv                                         | `[tool.uv] required-version` in `backend/pyproject.toml` | `setup-uv` `version-file`                      | uv refuses to run the project with another version; `uv self update <version>` or `brew upgrade uv` |
+| Python                                     | `backend/.python-version`                                | uv (`uv sync` in `backend/`)                   | uv installs and uses it automatically (`uv python install` in `backend/`)                           |
+| Node.js (and its bundled npm)              | `.nvmrc`                                                 | `setup-node` `node-version-file`               | `nvm install` / `nvm use` (or fnm); npm warns (`EBADENGINE`) on another version                     |
+| pre-commit                                 | `backend/uv.lock` (backend dev dependency)               | `uv run --project backend --locked pre-commit` | `uv run --project backend --locked pre-commit ...`                                                  |
+| gitleaks, actionlint, hadolint, shellcheck | hook `rev` in `.pre-commit-config.yaml`                  | through pre-commit                             | through pre-commit                                                                                  |
+| ruff, mypy, eslint, prettier, ...          | `backend/uv.lock`, `frontend/package-lock.json`          | `uv sync --locked`, `npm ci`                   | `uv sync`, `npm ci`                                                                                 |
+
+The uv pin is exact and Dependabot does not bump it: when Dependabot reports a
+uv version mismatch, bump `required-version` by hand in a PR ([#22](https://github.com/infonl/podiumd-admin-tool/issues/22)).
+
+Known gap: actionlint shellchecks workflow `run:` blocks with the `shellcheck`
+on `PATH`, not the pinned shellcheck-py hook version
+([#23](https://github.com/infonl/podiumd-admin-tool/issues/23)).
+
+`package.json` `engines` (and the root entry in each `package-lock.json`)
+repeats `.nvmrc` as `^<version>` because npm cannot read `.nvmrc`; a pre-commit
+hook (`.github/scripts/check-node-engines.sh`) fails when they disagree. npm
+only warns on a mismatch: `engine-strict` is not set, because Dependabot's npm
+updater runs an older Node.js and would fail every update. CI always installs
+exactly `.nvmrc`.
+
+The Python language level comes from `requires-python` in
+`backend/pyproject.toml`: ruff infers its target from it, and mypy checks
+against the interpreter, which is the one in `backend/.python-version`. uv
+rejects a `.python-version` outside `requires-python`.
+
+After a version bump, update locally with `uv self update <version>` (or
+`brew upgrade uv`), `nvm install` in the repository root, and `uv sync` and
+`npm ci` again.
 
 ### Database and integration tests
 
@@ -78,34 +117,57 @@ uv run alembic upgrade head --sql
 ### Pre-commit hooks
 
 The hooks in [.pre-commit-config.yaml](.pre-commit-config.yaml) run ruff,
-prettier, eslint, gitleaks, hadolint, actionlint and whitespace fixers on every
-commit. The ruff, prettier and eslint hooks use the versions locked in the
-backend and frontend, so install those first. Then install the hooks once per
-clone:
+prettier, eslint, gitleaks, hadolint, actionlint, shellcheck and whitespace
+fixers on every commit. pre-commit itself is a backend dev dependency, and the
+ruff, prettier and eslint hooks use the versions locked in the backend and
+frontend, so install those first. Then install the hooks once per clone:
 
 ```sh
 (cd backend && uv sync) && (cd frontend && npm ci)
-uvx pre-commit install
+uv run --project backend --locked pre-commit install
 ```
 
-Run all hooks against the whole repository with `uvx pre-commit run --all-files`.
-CI runs the same command, so a green local run means a green `hygiene` job.
+Run all hooks against the whole repository with
+`uv run --project backend --locked pre-commit run --all-files`. CI runs the
+same command with the same pre-commit version, so a green local run means a
+green `hygiene` job. The full-history gitleaks scan that CI also runs is
+`uv run --project backend --locked pre-commit run gitleaks-history --hook-stage manual`.
 
 ### Quality gates
 
 CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs these checks on
-every pull request; run them locally before you push.
+pull requests and on `main`; run them locally before you push.
 
-| Area     | Commands                                                                                                                               |
-| -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Backend  | `uv run ruff check .`, `uv run ruff format --check .`, `uv run mypy`, `uv run lint-imports`, `uv run pytest`, coverage gate, pip-audit |
-| Frontend | `npm run lint`, `npm run format:check`, `npm run typecheck`, `npm run test:coverage`, `npm audit`                                      |
-| Hygiene  | `uvx pre-commit run --all-files`, gitleaks over the full history, actionlint, hadolint                                                 |
+| Area     | Commands                                                                                                                                  |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Backend  | `uv run ruff check .`, `uv run ruff format --check .`, `uv run mypy`, `uv run lint-imports`, `uv run pytest`, coverage gate, pip-audit    |
+| Frontend | `npm run lint`, `npm run format:check`, `npm run typecheck`, `npm run test:coverage`, `npm audit`                                         |
+| Hygiene  | `uv run --project backend --locked pre-commit run --all-files`, gitleaks over the full history, actionlint, hadolint, the path gate tests |
 
 CodeQL ([.github/workflows/codeql.yml](.github/workflows/codeql.yml)) analyses
 Python and TypeScript on every pull request, on `main` and weekly. Dependabot
 ([.github/dependabot.yml](.github/dependabot.yml)) proposes dependency updates
 weekly. All GitHub Actions are pinned to commit SHAs.
+
+On pull requests the checks are gated by path: a job or CodeQL language only
+runs when the PR touches its area, as decided by
+[.github/scripts/changed-areas.sh](.github/scripts/changed-areas.sh). `hygiene`
+always runs. A gated check still reports, as skipped (`backend`, `frontend`) or
+as a quick pass (CodeQL), so the required checks on `main` never wait. Pushes to
+`main`, the weekly CodeQL run and manual runs check everything.
+
+| Area                           | Runs when a pull request changes                                                                                                    |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `backend`                      | `backend/`, `.gitignore`, `ci.yml`                                                                                                  |
+| `frontend`                     | `frontend/`, `e2e/`, `.nvmrc`, `.prettierrc.json`, `.prettierignore`, `.editorconfig`, `.gitignore`, `ci.yml`                       |
+| CodeQL (python)                | `backend/`, any `*.py` or `*.pyi` file, `codeql.yml`                                                                                |
+| CodeQL (javascript-typescript) | `frontend/`, `e2e/`, any JavaScript, TypeScript or HTML file (CodeQL scans the whole repository, `.claude/` included), `codeql.yml` |
+| `hygiene`                      | always                                                                                                                              |
+
+Changing `changed-areas.sh` itself runs every gated check. `.pre-commit-config.yaml`
+is only used by `hygiene`, which always runs. `hygiene` also runs
+[.github/scripts/test-changed-areas.sh](.github/scripts/test-changed-areas.sh),
+the tests for the gate itself; run it locally after changing the mapping.
 
 ### Coverage gate
 

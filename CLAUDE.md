@@ -70,4 +70,14 @@ npm run lint && npm run format:check && npm run typecheck && npm run test:covera
 
 End-to-end tests (in `e2e/`): `npm ci && npm test`.
 
-Repository hooks: `uvx pre-commit run --all-files`.
+Repository hooks: `uv run --project backend --locked pre-commit run --all-files`. This uses the pre-commit version locked in `backend/uv.lock`; install the hooks with `uv run --project backend --locked pre-commit install`.
+
+**Tool versions have one source each,** read by CI and local development alike (see the README, "Tool versions"):
+
+- uv: `required-version` in `backend/pyproject.toml`;
+- Python: `backend/.python-version`;
+- Node: `.nvmrc`;
+- pre-commit: `backend/uv.lock`;
+- hook tools (gitleaks, actionlint, hadolint, shellcheck): `.pre-commit-config.yaml`.
+
+Never hard-code a tool version in a workflow or a doc command.

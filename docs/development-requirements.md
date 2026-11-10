@@ -12,10 +12,12 @@ This is input for the OpenSpec project config and CLAUDE.md. These are working p
 ## Quality gates
 
 - Quality checks exist from the first PR, and each one becomes a required status check on `main` as soon as it exists. `main` only accepts PRs.
-- **Locally:** pre-commit hooks for ruff, prettier, eslint, gitleaks, hadolint, actionlint and whitespace fixers.
+- **Locally:** pre-commit hooks for ruff, prettier, eslint, gitleaks, hadolint, actionlint, shellcheck and whitespace fixers.
+- **One source per tool version.** Every tool version is set in one file that CI and local development both read: uv in `backend/pyproject.toml` (`[tool.uv] required-version`), Python in `backend/.python-version`, Node.js in `.nvmrc`, pre-commit in `backend/uv.lock`, and gitleaks, actionlint, hadolint and shellcheck as hook revs in `.pre-commit-config.yaml`. Workflows never hard-code a tool version. Versions are exact patch releases. A mismatch fails locally for uv (`required-version`) and warns for npm (`engines`; `engine-strict` would break Dependabot). The table in the README lists the files and how to update.
 - **Backend:** ruff (lint + format), mypy --strict, import-linter (hexagonal boundaries), pytest with a coverage gate of ≥ 85% on domain/application, pip-audit.
 - **Frontend:** eslint (typescript-eslint strict, react-hooks, jsx-a11y, i18next), prettier, tsc, vitest with coverage, npm audit.
 - **Repository:** gitleaks, actionlint, CodeQL (Python and TypeScript), Dependabot (weekly). Actions are pinned to commit SHAs.
+- **Path gates.** On pull requests the backend, frontend and CodeQL checks run only when the PR touches their area (`.github/scripts/changed-areas.sh`; mapping in the README). Gated checks still report so required checks never wait; `on.pull_request.paths` is not used for that reason. Hygiene always runs, including `.github/scripts/test-changed-areas.sh` for the gate itself; pushes to `main`, scheduled and manual runs check everything.
 - **Chart:** helm lint, helm-unittest, kubeconform. The RBAC must be namespace-scoped, with no `pods/exec` and no Secrets `list`.
 - **Image:** hadolint, Trivy (fails on HIGH or CRITICAL fixable vulnerabilities), smoke test. On tags: cosign signing and an SBOM.
 - **E2E:** Playwright BDD on kind.
