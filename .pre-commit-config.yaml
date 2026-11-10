@@ -60,6 +60,12 @@ repos:
         language: system
         files: ^frontend/.*\.(js|jsx|ts|tsx)$
         require_serial: true
+      - id: node-engines
+        name: package.json engines match .nvmrc
+        entry: .github/scripts/check-node-engines.sh
+        language: system
+        files: ^(\.nvmrc|(frontend|e2e)/(package\.json|\.npmrc))$
+        pass_filenames: false
 
   - repo: https://github.com/gitleaks/gitleaks
     rev: 83d9cd684c87d95d656c1458ef04895a7f1cbd8e # frozen: v8.30.1
