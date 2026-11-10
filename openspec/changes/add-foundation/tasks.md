@@ -43,10 +43,10 @@
 
 ## 4. Persistence adapter
 
-- [ ] 4.1 Add Alembic migrations for the `audit_entries` and `sessions` tables, with the D4 indexes and the grants for `podiumd_admin_app` (SELECT/INSERT only on `audit_entries`).
-- [ ] 4.2 Write failing integration tests with testcontainers PostgreSQL, which creates the owner and app roles: inserting and querying Audit Entries; UPDATE, DELETE and TRUNCATE as the app user fail with a permission error. Then implement `SqlAuditRepository`.
-- [ ] 4.3 Write failing integration tests for the Audit Log query: filters for time range (inclusive), username (case-insensitive substring), action and outcome; pagination of 50, newest first. Then implement it.
-- [ ] 4.4 Write failing tests for `SqlSessionStore`: lookup by SHA-256 of the session id; tokens encrypted with MultiFernet, decryptable with rotated keys; an unknown id → none. Then implement.
+- [x] 4.1 Add Alembic migrations for the `audit_entries` and `sessions` tables, with the D4 indexes and the grants for `podiumd_admin_app` (SELECT/INSERT only on `audit_entries`).
+- [x] 4.2 Write failing integration tests with testcontainers PostgreSQL, which creates the owner and app roles: inserting and querying Audit Entries; UPDATE, DELETE and TRUNCATE as the app user fail with a permission error. Then implement `SqlAuditRepository`.
+- [x] 4.3 Write failing integration tests for the Audit Log query: filters for time range (inclusive), username (case-insensitive substring), action and outcome; pagination of 50, newest first. Then implement it.
+- [x] 4.4 Write failing tests for `SqlSessionStore`: lookup by SHA-256 of the session id; tokens encrypted with MultiFernet, decryptable with rotated keys; an unknown id → none. Then implement.
 
 ## 5. Logging adapter
 

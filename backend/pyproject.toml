@@ -12,7 +12,7 @@ dependencies = [
     "httpx>=0.28.1",
     "psycopg[binary]>=3.3.8",
     "pydantic-settings>=2.16.2",
-    "sqlalchemy>=2.1.8",
+    "sqlalchemy[asyncio]>=2.1.8",
     "structlog>=26.1.0",
     "uvicorn[standard]>=0.54.0",
 ]
@@ -84,9 +84,9 @@ containers = ["podiumd_admin"]
 layers = ["adapters", "application", "ports", "domain"]
 
 [[tool.importlinter.contracts]]
-name = "Domain and application import no web, persistence or OIDC framework (ADR 0009)"
+name = "Domain, application and ports import no web, persistence or OIDC framework (ADR 0009)"
 type = "forbidden"
-source_modules = ["podiumd_admin.domain", "podiumd_admin.application"]
+source_modules = ["podiumd_admin.domain", "podiumd_admin.application", "podiumd_admin.ports"]
 forbidden_modules = [
   "fastapi",
   "starlette",
@@ -108,6 +108,9 @@ addopts = [
   "--cov=podiumd_admin",
   "--cov-report=term-missing",
   "--cov-report=xml",
+]
+markers = [
+  "integration: needs Docker; runs against a real PostgreSQL via testcontainers (part of the default run)",
 ]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"

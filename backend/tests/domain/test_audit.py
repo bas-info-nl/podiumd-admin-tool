@@ -431,6 +431,38 @@ def test_ordinary_parameter_names_are_allowed(key: str) -> None:
     assert key in _entry(parameters={key: "x"}).parameters
 
 
+def test_parameter_names_that_look_secret_after_truncation_are_rejected() -> None:
+    # Truncation cuts this harmless name down to ``xxx…_token…``, which looks
+    # like a secret name and would be rejected when the stored entry is read.
+    key = "x" * 57 + "_tokenizer_name"
+
+    with pytest.raises(SecretParameterError):
+        _entry(parameters={key: "x"})
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "page",
+        "k" * (MAX_PARAMETER_KEY_LENGTH + 10),
+        "x" * 57 + "_tokenizer_name",
+        "x" * 50 + "_secretariat_code",
+        "x" * 55 + "_keyboard_layout",
+        "component_" + "y" * MAX_PARAMETER_KEY_LENGTH,
+    ],
+)
+def test_rebuilding_an_entry_from_its_parameters_keeps_them(key: str) -> None:
+    """An accepted entry's parameters are accepted again unchanged, as on read."""
+    try:
+        entry = _entry(parameters={key: "y" * (MAX_PARAMETER_VALUE_LENGTH + 1)})
+    except SecretParameterError:
+        return
+
+    rebuilt = _entry(parameters=dict(entry.parameters))
+
+    assert rebuilt.parameters == entry.parameters
+
+
 # --- AuditEntry: client IP ------------------------------------------------------
 
 

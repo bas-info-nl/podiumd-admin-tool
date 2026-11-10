@@ -98,7 +98,7 @@ def _lint_package_with_leak(tmp_path: Path, module: str, source: str) -> str:
     return result.stdout
 
 
-@pytest.mark.parametrize("layer", ["domain", "application"])
+@pytest.mark.parametrize("layer", ["domain", "application", "ports"])
 @pytest.mark.parametrize("framework", ["fastapi", "sqlalchemy", "authlib"])
 def test_contract_rejects_a_framework_import_in_the_inner_layers(
     tmp_path: Path, layer: str, framework: str
