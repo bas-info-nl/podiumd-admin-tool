@@ -78,8 +78,8 @@ uv run alembic upgrade head --sql
 ### Pre-commit hooks
 
 The hooks in [.pre-commit-config.yaml](.pre-commit-config.yaml) run ruff,
-prettier, eslint, gitleaks, hadolint, actionlint and whitespace fixers on every
-commit. The ruff, prettier and eslint hooks use the versions locked in the
+prettier, eslint, gitleaks, hadolint, actionlint, shellcheck and whitespace
+fixers on every commit. The ruff, prettier and eslint hooks use the versions locked in the
 backend and frontend, so install those first. Then install the hooks once per
 clone:
 
@@ -123,7 +123,9 @@ as a quick pass (CodeQL), so the required checks on `main` never wait. Pushes to
 | `hygiene`                      | always                                                                                                                              |
 
 Changing `changed-areas.sh` itself runs every gated check. `.pre-commit-config.yaml`
-is only used by `hygiene`, which always runs.
+is only used by `hygiene`, which always runs. `hygiene` also runs
+[.github/scripts/test-changed-areas.sh](.github/scripts/test-changed-areas.sh),
+the tests for the gate itself; run it locally after changing the mapping.
 
 ### Coverage gate
 
