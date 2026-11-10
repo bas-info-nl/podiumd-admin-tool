@@ -17,6 +17,7 @@ from typing import Any
 from sqlalchemy import ColumnElement, Row, func, insert, select
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from podiumd_admin.adapters.audit_fields import audit_entry_fields
 from podiumd_admin.adapters.db.tables import audit_entries
 from podiumd_admin.domain.audit import AuditEntry, Outcome, ReasonCode
 from podiumd_admin.domain.audit_log import AUDIT_LOG_PAGE_SIZE, AuditLogPage, AuditLogQuery
@@ -49,25 +50,6 @@ def _conditions(query: AuditLogQuery) -> list[ColumnElement[bool]]:
     if query.outcome is not None:
         conditions.append(columns.outcome == query.outcome.value)
     return conditions
-
-
-def _to_row(entry: AuditEntry) -> dict[str, Any]:
-    return {
-        "id": entry.id,
-        "occurred_at": entry.occurred_at,
-        "environment_municipality": entry.environment.municipality,
-        "environment_stage": entry.environment.stage.value,
-        "environment_label": entry.environment.label,
-        "action": entry.action,
-        "target": entry.target,
-        "outcome": entry.outcome.value,
-        "reason": entry.reason.value if entry.reason is not None else None,
-        "user_subject": entry.user_subject,
-        "username": entry.username,
-        "parameters": dict(entry.parameters),
-        "correlation_id": entry.correlation_id,
-        "client_ip": entry.client_ip,
-    }
 
 
 def _to_entry(row: Row[Any]) -> AuditEntry:
@@ -103,7 +85,7 @@ class SqlAuditRepository:
 
     async def add(self, entry: AuditEntry) -> None:
         """Insert ``entry`` in the caller's transaction. Raises if the database refuses it."""
-        await self._connection.execute(insert(audit_entries).values(_to_row(entry)))
+        await self._connection.execute(insert(audit_entries).values(audit_entry_fields(entry)))
 
     async def search(self, query: AuditLogQuery) -> AuditLogPage:
         """Return the page ``query`` asks for: matching entries, newest first.

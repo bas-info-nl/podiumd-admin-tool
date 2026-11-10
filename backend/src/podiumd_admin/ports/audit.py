@@ -40,6 +40,10 @@ class AuditLogReader(Protocol):
 class AuditSink(Protocol):
     """Writes audit events to stdout, never to the database."""
 
+    def entry_stored(self, entry: AuditEntry) -> None:
+        """Write the stdout copy of ``entry``. Call only once it has been committed."""
+        ...
+
     def audit_write_failed(self, entry: AuditEntry, error: Exception) -> None:
         """Report that ``entry`` could not be stored because of ``error``."""
         ...
