@@ -1,25 +1,33 @@
 #!/usr/bin/env bash
 # .nvmrc is the one Node.js version for local development (nvm use) and CI
 # (actions/setup-node node-version-file). npm cannot read it, so each
-# package.json repeats it as "engines": {"node": "^<.nvmrc>"}, which
-# engine-strict in the package's .npmrc enforces on npm install and npm ci.
-# This check, run as a pre-commit hook, keeps the copies equal to .nvmrc.
+# package.json repeats it as "engines": {"node": "^<.nvmrc>"}; npm warns
+# (EBADENGINE) when the running Node.js does not satisfy that. This check, run
+# as a pre-commit hook, keeps the copies equal to .nvmrc.
+#
+# engine-strict is deliberately not set: Dependabot's npm updater runs an
+# older Node.js and would fail every update for /frontend and /e2e.
 set -euo pipefail
 
 root=$(git rev-parse --show-toplevel)
-expected="^$(tr -d '[:space:]' <"${root}/.nvmrc")"
+nvmrc=$(tr -d '[:space:]' <"${root}/.nvmrc")
+expected="^${nvmrc#v}"
 status=0
 
 for package in frontend e2e; do
-  actual=$(node -p "require(process.argv[1]).engines?.node ?? ''" "${root}/${package}/package.json")
-  if [[ "${actual}" != "${expected}" ]]; then
-    echo "${package}/package.json: engines.node is '${actual}', expected '${expected}' (from .nvmrc)." >&2
-    status=1
-  fi
-  if ! grep -qx 'engine-strict=true' "${root}/${package}/.npmrc" 2>/dev/null; then
-    echo "${package}/.npmrc: engine-strict=true is missing." >&2
-    status=1
-  fi
+  for file in package.json package-lock.json; do
+    if [[ "${file}" == package.json ]]; then
+      query="require(process.argv[1]).engines?.node ?? ''"
+    else
+      # The lockfile records the root package's engines under packages[""].
+      query="require(process.argv[1]).packages?.['']?.engines?.node ?? ''"
+    fi
+    actual=$(node -p "${query}" "${root}/${package}/${file}")
+    if [[ "${actual}" != "${expected}" ]]; then
+      echo "${package}/${file}: engines.node is '${actual}', expected '${expected}' (from .nvmrc)." >&2
+      status=1
+    fi
+  done
 done
 
 exit "${status}"
