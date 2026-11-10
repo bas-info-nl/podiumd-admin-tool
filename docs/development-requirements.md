@@ -16,6 +16,7 @@ This is input for the OpenSpec project config and CLAUDE.md. These are working p
 - **Backend:** ruff (lint + format), mypy --strict, import-linter (hexagonal boundaries), pytest with a coverage gate of ≥ 85% on domain/application, pip-audit.
 - **Frontend:** eslint (typescript-eslint strict, react-hooks, jsx-a11y, i18next), prettier, tsc, vitest with coverage, npm audit.
 - **Repository:** gitleaks, actionlint, CodeQL (Python and TypeScript), Dependabot (weekly). Actions are pinned to commit SHAs.
+- **Path gates.** On pull requests the backend, frontend and CodeQL checks run only when the PR touches their area (`.github/scripts/changed-areas.sh`; mapping in the README). Gated checks still report so required checks never wait; `on.pull_request.paths` is not used for that reason. Hygiene always runs; pushes to `main`, scheduled and manual runs check everything.
 - **Chart:** helm lint, helm-unittest, kubeconform. The RBAC must be namespace-scoped, with no `pods/exec` and no Secrets `list`.
 - **Image:** hadolint, Trivy (fails on HIGH or CRITICAL fixable vulnerabilities), smoke test. On tags: cosign signing and an SBOM.
 - **E2E:** Playwright BDD on kind.

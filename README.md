@@ -94,7 +94,7 @@ CI runs the same command, so a green local run means a green `hygiene` job.
 ### Quality gates
 
 CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs these checks on
-every pull request; run them locally before you push.
+pull requests and on `main`; run them locally before you push.
 
 | Area     | Commands                                                                                                                               |
 | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
@@ -106,6 +106,24 @@ CodeQL ([.github/workflows/codeql.yml](.github/workflows/codeql.yml)) analyses
 Python and TypeScript on every pull request, on `main` and weekly. Dependabot
 ([.github/dependabot.yml](.github/dependabot.yml)) proposes dependency updates
 weekly. All GitHub Actions are pinned to commit SHAs.
+
+On pull requests the checks are gated by path: a job or CodeQL language only
+runs when the PR touches its area, as decided by
+[.github/scripts/changed-areas.sh](.github/scripts/changed-areas.sh). `hygiene`
+always runs. A gated check still reports, as skipped (`backend`, `frontend`) or
+as a quick pass (CodeQL), so the required checks on `main` never wait. Pushes to
+`main`, the weekly CodeQL run and manual runs check everything.
+
+| Area                           | Runs when a pull request changes                                                                                                    |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `backend`                      | `backend/`, `.gitignore`, `ci.yml`                                                                                                  |
+| `frontend`                     | `frontend/`, `e2e/`, `.nvmrc`, `.prettierrc.json`, `.prettierignore`, `.editorconfig`, `.gitignore`, `ci.yml`                       |
+| CodeQL (python)                | `backend/`, any `*.py` or `*.pyi` file, `codeql.yml`                                                                                |
+| CodeQL (javascript-typescript) | `frontend/`, `e2e/`, any JavaScript, TypeScript or HTML file (CodeQL scans the whole repository, `.claude/` included), `codeql.yml` |
+| `hygiene`                      | always                                                                                                                              |
+
+Changing `changed-areas.sh` itself runs every gated check. `.pre-commit-config.yaml`
+is only used by `hygiene`, which always runs.
 
 ### Coverage gate
 
