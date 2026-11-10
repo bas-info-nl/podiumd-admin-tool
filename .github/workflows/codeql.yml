@@ -48,8 +48,11 @@ jobs:
           # The PR merge commit and its first parent (the base branch tip).
           fetch-depth: 2
 
+      # Fails open, like ci.yml: if detection breaks, its outputs stay empty and
+      # the `!= 'false'` guards below run the analysis.
       - name: Detect changed areas
         id: areas
+        continue-on-error: true
         run: .github/scripts/changed-areas.sh
 
       - name: Skip analysis (no ${{ matrix.language }} changes)
