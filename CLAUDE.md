@@ -70,7 +70,7 @@ npm run lint && npm run format:check && npm run typecheck && npm run test:covera
 
 End-to-end tests (in `e2e/`): `npm ci && npm test`.
 
-Repository hooks: `uv run --project backend pre-commit run --all-files`. This uses the pre-commit version locked in `backend/uv.lock`; install the hooks with `uv run --project backend pre-commit install`.
+Repository hooks: `uv run --project backend --locked pre-commit run --all-files`. This uses the pre-commit version locked in `backend/uv.lock`; install the hooks with `uv run --project backend --locked pre-commit install`.
 
 **Tool versions have one source each,** read by CI and local development alike (see the README, "Tool versions"):
 
