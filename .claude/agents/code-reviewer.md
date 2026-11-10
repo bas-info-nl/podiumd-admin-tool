@@ -39,4 +39,11 @@ The organisation's Copilot reviewer comments on every PR within minutes. Evaluat
 
 When in doubt between fix and follow-up, prefer **fix** for correctness, security and data-loss issues, and **follow-up** for performance, refactoring and nice-to-haves.
 
+**Stop rule, so the loop converges.** Copilot regularly reports "previously missed issues" in code the PR did not change. Decide by where the finding is:
+
+- **Lines changed by this PR:** judge on merit, as described above.
+- **Unchanged code ("previously missed"):** **follow-up** by default. Choose **fix** only for a correctness, security or data-loss defect that this PR's behaviour depends on.
+
+Never let a PR grow beyond its scope just because a new Copilot round found older issues.
+
 After the developer's fixes, review the fix commits as a branch review: re-run the checks, and confirm each finding is genuinely resolved, not just renamed.
