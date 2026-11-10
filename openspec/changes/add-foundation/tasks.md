@@ -50,7 +50,7 @@
 
 ## 5. Logging adapter
 
-- [ ] 5.1 Configure structlog for JSON on stdout. Write failing tests showing that a stored Audit Entry is emitted exactly once with `log_type: "audit"` after commit, and that ordinary logs never carry that marker. Then implement `StdoutAuditSink`.
+- [x] 5.1 Configure structlog for JSON on stdout. Write failing tests showing that a stored Audit Entry is emitted exactly once with `log_type: "audit"` after commit, and that ordinary logs never carry that marker. Then implement `StdoutAuditSink`.
 
 ## 6. Configuration and app bootstrap
 
