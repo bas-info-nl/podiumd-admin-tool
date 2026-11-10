@@ -16,6 +16,7 @@ a stored entry is written by the adapters after the commit (D4), not here.
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Awaitable, Callable
 
 from podiumd_admin.domain.audit import AuditEntry, Outcome
@@ -72,11 +73,15 @@ class AuditRecorder:
         """Insert ``entry``; on failure report it to stdout and return the error.
 
         Only ``Exception`` is caught: cancellation and interpreter exits are
-        not audit failures and propagate.
+        not audit failures and propagate. If the stdout report fails as well,
+        that error is dropped: there is nowhere left to report it, and raising
+        it would mask the storage error, so ``record_then_act`` would not raise
+        ``AuditWriteFailedError`` and ``record_denial`` would raise.
         """
         try:
             await self._repository.add(entry)
         except Exception as error:
-            self._sink.audit_write_failed(entry, error)
+            with contextlib.suppress(Exception):
+                self._sink.audit_write_failed(entry, error)
             return error
         return None

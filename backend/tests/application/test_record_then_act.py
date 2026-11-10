@@ -106,6 +106,25 @@ async def test_insert_failure_prevents_the_action(
     assert sink.write_failures == [(entry, insert_error)]
 
 
+async def test_insert_failure_raises_audit_write_failed_even_when_the_stdout_report_fails(
+    recorder: AuditRecorder, repository: FakeAuditRepository, sink: FakeAuditSink
+) -> None:
+    # Issue #13: a failing stdout report must not mask the promised error.
+    insert_error = PermissionError("permission denied for table audit_entries")
+    repository.error = insert_error
+    sink.report_error = OSError("stdout closed")
+    entry = _entry()
+
+    async def act() -> None:
+        pytest.fail("the action must not run")
+
+    with pytest.raises(AuditWriteFailedError) as raised:
+        await recorder.record_then_act(entry, act)
+
+    assert raised.value.__cause__ is insert_error
+    assert sink.write_failures == [(entry, insert_error)]
+
+
 async def test_an_action_that_fails_keeps_its_entry_and_raises_unchanged(
     recorder: AuditRecorder, repository: FakeAuditRepository, sink: FakeAuditSink
 ) -> None:
@@ -183,6 +202,20 @@ async def test_denial_still_denies_when_the_insert_fails_and_reports_it_on_stdou
     await recorder.record_denial(entry)
 
     assert repository.entries == []
+    assert sink.write_failures == [(entry, insert_error)]
+
+
+async def test_denial_does_not_raise_when_the_insert_and_the_stdout_report_both_fail(
+    recorder: AuditRecorder, repository: FakeAuditRepository, sink: FakeAuditSink
+) -> None:
+    # Issue #13: record_denial never raises, so the request is refused as a denial.
+    insert_error = ConnectionError("database unreachable")
+    repository.error = insert_error
+    sink.report_error = OSError("stdout closed")
+    entry = _entry(Outcome.DENIED)
+
+    await recorder.record_denial(entry)
+
     assert sink.write_failures == [(entry, insert_error)]
 
 
