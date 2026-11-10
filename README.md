@@ -69,7 +69,11 @@ workflow or a doc; change the file in the table instead.
 | ruff, mypy, eslint, prettier, ...          | `backend/uv.lock`, `frontend/package-lock.json`          | `uv sync --locked`, `npm ci`                   | `uv sync`, `npm ci`                                                                                 |
 
 The uv pin is exact and Dependabot does not bump it: when Dependabot reports a
-uv version mismatch, bump `required-version` by hand in a PR.
+uv version mismatch, bump `required-version` by hand in a PR ([#22](https://github.com/infonl/podiumd-admin-tool/issues/22)).
+
+Known gap: actionlint shellchecks workflow `run:` blocks with the `shellcheck`
+on `PATH`, not the pinned shellcheck-py hook version
+([#23](https://github.com/infonl/podiumd-admin-tool/issues/23)).
 
 `package.json` `engines` (and the root entry in each `package-lock.json`)
 repeats `.nvmrc` as `^<version>` because npm cannot read `.nvmrc`; a pre-commit
