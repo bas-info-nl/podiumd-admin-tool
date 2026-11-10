@@ -14,9 +14,12 @@ export const meta = {
 // args:
 //   implement: { mode: 'implement', change, group, tasks, branch, devExtra?, extra? }
 //   review:    { mode: 'review', pr, branch }
-const ROOT = '/Users/bas.de.wit/projects/bas-info-nl/podiumd-admin-tool'
+//   both:      root? - absolute path of the repository checkout. When omitted,
+//              the agents use their current working directory (the workspace
+//              the workflow runs in) and repo-relative paths.
 const REPO = 'infonl/podiumd-admin-tool'
 const A = args || {}
+const ROOT = A.root || null
 const MODE = A.mode || 'implement'
 const CHANGE = A.change || 'add-foundation'
 const BRANCH = A.branch
@@ -24,8 +27,9 @@ const MAX_REVIEW_ROUNDS = 4
 const MAX_COPILOT_ROUNDS = 3
 if (!BRANCH) throw new Error('args.branch is required')
 
-const role = name => `You are the ${name.toUpperCase()}. First read and follow your role definition in ${ROOT}/.claude/agents/${name}.md, and the repository rules in ${ROOT}/CLAUDE.md.`
-const CTX = `Repository ${ROOT} (GitHub ${REPO}). Feature branch: ${BRANCH}.`
+const repoPath = rel => (ROOT ? `${ROOT}/${rel}` : rel)
+const role = name => `You are the ${name.toUpperCase()}. First read and follow your role definition in ${repoPath(`.claude/agents/${name}.md`)}, and the repository rules in ${repoPath('CLAUDE.md')}.`
+const CTX = `Repository ${ROOT || 'in your current working directory (the workspace this workflow runs in); paths are relative to the repository root'} (GitHub ${REPO}). Feature branch: ${BRANCH}.`
 
 const DEV = { type: 'object', properties: {
   summary: { type: 'string' },
@@ -112,6 +116,7 @@ result.pr = pr
 phase('Copilot')
 const handled = []
 result.copilotRounds = []
+let lastCiPassed = true
 for (let round = 1; round <= MAX_COPILOT_ROUNDS; round++) {
   const fb = await agent(`${role('task-manager')}\n${CTX}\nPR #${pr}. Make sure the local checkout is on ${BRANCH} and up to date with origin. Wait (poll every ~30s, at most ~15 minutes) until (a) the required checks have finished and (b) the Copilot review of the current head SHA has been submitted (see "Copilot reviews" in your role). Then return the CI result and every Copilot finding that still needs handling: all UNRESOLVED review threads, plus review-body findings (e.g. "previously missed issues") that are not in this already-handled list: ${JSON.stringify(handled)}. Do not change anything.`,
     { label: `task-manager:collect-${round}`, phase: 'Copilot', schema: FEEDBACK })
@@ -119,8 +124,16 @@ for (let round = 1; round <= MAX_COPILOT_ROUNDS; round++) {
   log(`Copilot round ${round}: CI ${fb.ciPassed ? 'green' : 'RED'}, Copilot ${fb.copilotReviewed ? 'reviewed' : 'not reviewed'}, ${fb.findings.length} finding(s)`)
   const entry = { round, ci: fb.ciSummary, copilotReviewed: fb.copilotReviewed, findings: fb.findings.length }
   result.copilotRounds.push(entry)
+  lastCiPassed = fb.ciPassed
   if (!fb.ciPassed) entry.note = 'CI failing — needs attention'
-  if (!fb.findings.length && fb.ciPassed) break
+  if (!fb.copilotReviewed) {
+    // A collector timeout is not a clean review: record it. With CI green and
+    // nothing to handle, stop; with CI red, fall through to the CI repair.
+    entry.note = `Copilot review of head ${fb.headSha} not received within the wait window (timeout)${fb.ciPassed ? '' : '; CI failing'}`
+    result.copilotTimedOut = true
+    if (!fb.findings.length && fb.ciPassed) break
+  }
+  if (fb.copilotReviewed && fb.ciPassed && !fb.findings.length) break
   if (!fb.findings.length && !fb.ciPassed) {
     // CI red without Copilot findings: let the developer fix CI.
     const ci = await buildAndReview(`CI on PR #${pr} is failing: ${fb.ciSummary}. Inspect the failed jobs ('gh' is NOT allowed for you — the summary above is what you get; reproduce locally), fix the cause test-first, commit locally.`, `fix the failing CI on PR #${pr}`, `ci-${round}`)
@@ -151,10 +164,20 @@ for (let round = 1; round <= MAX_COPILOT_ROUNDS; round++) {
   await agent(`${role('task-manager')}\n${CTX}\nApply the code-reviewer's triage of the Copilot findings on PR #${pr} (see "Copilot reviews" in your role):\n${fixes.length ? `1. Push the approved fix commits on ${BRANCH}.\n` : ''}2. For each decision: fix -> reply with the developer's reply (naming the commit) and resolve; follow-up -> create the GitHub issue (label follow-up plus bug or enhancement), reply with its link and resolve; decline -> reply with the reason and resolve. Review-body findings (id starts with "body:") have no thread: cover them in one PR comment.\n${fixes.length ? `3. Request a new Copilot review: gh pr edit ${pr} --add-reviewer @copilot\n` : ''}No @mentions. Do not merge. Report what you did per id.\nTRIAGE: ${JSON.stringify(triage.decisions)}\nDEVELOPER REPLIES: ${JSON.stringify(fixResult ? fixResult.dev.replies : [])}`,
     { label: `task-manager:apply-${round}`, phase: 'Copilot' })
   handled.push(...fb.findings.map(f => ({ id: f.id, path: f.path, line: f.line, gist: f.body.slice(0, 120) })))
-  if (!fixes.length) break // nothing pushed, so Copilot will not review again
+  // Nothing pushed and CI green: Copilot will not review again, so we are done.
+  // With CI red, continue: the threads are resolved now, so the next round
+  // collects no findings and takes the CI-repair branch.
+  if (!fixes.length && fb.ciPassed) break
+}
+if (!lastCiPassed) {
+  // The loop ended (round budget exhausted or a fix not approved) while the
+  // last observed CI run was red.
+  const last = result.copilotRounds[result.copilotRounds.length - 1]
+  last.note = `${last.note ? last.note + '; ' : ''}Copilot loop ended with CI still failing in the last observed run`
+  result.ciStillFailing = true
 }
 
-const report = await agent(`${role('task-manager')}\n${CTX}\nFinal hand-over for PR #${pr}: confirm there are no unresolved review threads and report the required checks ('gh pr checks ${pr} --required'). Switch the local checkout back to main ('git switch main && git pull --ff-only'). Return a concise message to the user: PR URL, CI results, what happened with the Copilot findings (fixed / follow-up issues with links / declined), and ask them to review before the next task group starts. Do not merge.`,
+const report = await agent(`${role('task-manager')}\n${CTX}\nFinal hand-over for PR #${pr}: confirm there are no unresolved review threads and report the required checks ('gh pr checks ${pr} --required'). Switch the local checkout back to main ('git switch main && git pull --ff-only'). Return a concise message to the user: PR URL, CI results, what happened with the Copilot findings (fixed / follow-up issues with links / declined), and ask them to review before the next task group starts. Do not merge.${result.copilotTimedOut ? `\nIMPORTANT: the Copilot review was NOT received within the wait window (timeout). Tell the user the Copilot review is still outstanding and must be checked before merging.` : ''}${result.ciStillFailing ? `\nIMPORTANT: the Copilot loop ended while the last observed CI run was failing. Tell the user CI is red and needs attention.` : ''}\nCopilot rounds: ${JSON.stringify(result.copilotRounds)}`,
   { label: 'task-manager:handover', phase: 'Copilot' })
 result.handover = report
 return result
