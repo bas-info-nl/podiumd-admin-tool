@@ -61,3 +61,7 @@ def configure_logging(*, stream: TextIO | None = None, level: int = logging.INFO
     root = logging.getLogger()
     root.handlers[:] = [handler]
     root.setLevel(level)
+    # The root level filters only records logged on the root logger itself; a
+    # propagated record from a child with its own level (uvicorn's) reaches the
+    # handler anyway. The StdoutAuditSink does not write through this handler.
+    handler.setLevel(level)

@@ -317,3 +317,30 @@ def test_the_log_level_filters_ordinary_logs(stream: io.StringIO) -> None:
     logger.warning("shown")
 
     assert [line["event"] for line in _lines(stream)] == ["shown"]
+
+
+def test_the_log_level_filters_a_child_logger_with_its_own_level(stream: io.StringIO) -> None:
+    # uvicorn sets its own loggers to INFO; their records propagate to the
+    # root handler whatever the root level, so the handler must filter too.
+    child = logging.getLogger("podiumd_admin.test.own_level")
+    child_level = child.level
+    child.setLevel(logging.INFO)
+    try:
+        configure_logging(stream=stream, level=logging.WARNING)
+
+        child.info("hidden")
+        child.warning("shown")
+    finally:
+        child.setLevel(child_level)
+
+    assert [line["event"] for line in _lines(stream)] == ["shown"]
+
+
+def test_audit_lines_are_written_at_a_warning_threshold(
+    sink: StdoutAuditSink, stream: io.StringIO
+) -> None:
+    configure_logging(stream=io.StringIO(), level=logging.WARNING)
+
+    sink.entry_stored(_entry())
+
+    assert len(_lines(stream)) == 1
