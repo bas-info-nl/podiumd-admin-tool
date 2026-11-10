@@ -31,8 +31,8 @@ and keeps an append-only Audit Log of every attempted action.
 
 ## Development
 
-Prerequisites: [uv](https://docs.astral.sh/uv/) and Node.js 22.22 or later
-(with npm). uv installs Python 3.12 for the backend.
+Prerequisites: [uv](https://docs.astral.sh/uv/) and Node.js with npm, in the
+versions below. uv installs Python for the backend.
 
 ```sh
 # Backend
@@ -51,6 +51,36 @@ npm ci
 npx playwright install chromium
 npm test
 ```
+
+### Tool versions
+
+Every tool version is set in exactly one file in this repository, and CI and
+local development read that same file. Do not repeat a version in a workflow or
+a doc; change the file in the table instead.
+
+| Tool                                       | Single source                                            | Read by CI                            | Locally                                                                                             |
+| ------------------------------------------ | -------------------------------------------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| uv                                         | `[tool.uv] required-version` in `backend/pyproject.toml` | `setup-uv` `version-file`             | uv refuses to run the project with another version; `uv self update <version>` or `brew upgrade uv` |
+| Python                                     | `backend/.python-version`                                | uv (`uv sync` in `backend/`)          | uv installs and uses it automatically                                                               |
+| Node.js (and its bundled npm)              | `.nvmrc`                                                 | `setup-node` `node-version-file`      | `nvm use` (or fnm); `engine-strict` makes `npm ci` refuse another major version                     |
+| pre-commit                                 | `backend/uv.lock` (backend dev dependency)               | `uv run --project backend pre-commit` | `uv run --project backend pre-commit ...`                                                           |
+| gitleaks, actionlint, hadolint, shellcheck | hook `rev` in `.pre-commit-config.yaml`                  | through pre-commit                    | through pre-commit                                                                                  |
+| ruff, mypy, eslint, prettier, ...          | `backend/uv.lock`, `frontend/package-lock.json`          | `uv sync --locked`, `npm ci`          | `uv sync`, `npm ci`                                                                                 |
+
+`package.json` `engines` repeats the `.nvmrc` major version because npm cannot
+read `.nvmrc`; a pre-commit hook (`.github/scripts/check-node-engines.sh`) fails
+when the two disagree.
+
+`requires-python`, ruff `target-version` and mypy `python_version` in
+`backend/pyproject.toml` describe the Python language level, not the
+interpreter; keep them in line with `backend/.python-version` (not checked
+automatically; `requires-python` makes uv reject a `.python-version` outside it). One known gap: actionlint
+runs shellcheck on `run:` scripts with whichever `shellcheck` is on `PATH`, so
+that shellcheck version can differ between your machine and the CI runner.
+
+After a version bump, update locally with `uv self update <version>` (or
+`brew upgrade uv`), `nvm install` in the repository root, and `uv sync` and
+`npm ci` again.
 
 ### Database and integration tests
 
@@ -79,17 +109,20 @@ uv run alembic upgrade head --sql
 
 The hooks in [.pre-commit-config.yaml](.pre-commit-config.yaml) run ruff,
 prettier, eslint, gitleaks, hadolint, actionlint, shellcheck and whitespace
-fixers on every commit. The ruff, prettier and eslint hooks use the versions locked in the
-backend and frontend, so install those first. Then install the hooks once per
-clone:
+fixers on every commit. pre-commit itself is a backend dev dependency, and the
+ruff, prettier and eslint hooks use the versions locked in the backend and
+frontend, so install those first. Then install the hooks once per clone:
 
 ```sh
 (cd backend && uv sync) && (cd frontend && npm ci)
-uvx pre-commit install
+uv run --project backend pre-commit install
 ```
 
-Run all hooks against the whole repository with `uvx pre-commit run --all-files`.
-CI runs the same command, so a green local run means a green `hygiene` job.
+Run all hooks against the whole repository with
+`uv run --project backend pre-commit run --all-files`. CI runs the same command
+with the same pre-commit version, so a green local run means a green `hygiene`
+job. The full-history gitleaks scan that CI also runs is
+`uv run --project backend pre-commit run gitleaks-history --hook-stage manual`.
 
 ### Quality gates
 
@@ -100,7 +133,7 @@ pull requests and on `main`; run them locally before you push.
 | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | Backend  | `uv run ruff check .`, `uv run ruff format --check .`, `uv run mypy`, `uv run lint-imports`, `uv run pytest`, coverage gate, pip-audit |
 | Frontend | `npm run lint`, `npm run format:check`, `npm run typecheck`, `npm run test:coverage`, `npm audit`                                      |
-| Hygiene  | `uvx pre-commit run --all-files`, gitleaks over the full history, actionlint, hadolint                                                 |
+| Hygiene  | `uv run --project backend pre-commit run --all-files`, gitleaks over the full history, actionlint, hadolint, the path gate tests       |
 
 CodeQL ([.github/workflows/codeql.yml](.github/workflows/codeql.yml)) analyses
 Python and TypeScript on every pull request, on `main` and weekly. Dependabot
