@@ -62,6 +62,11 @@ elif [[ $# -eq 0 ]]; then
   if [[ "${GITHUB_EVENT_NAME:-}" != "pull_request" ]]; then
     all_true "Event '${GITHUB_EVENT_NAME:-unknown}' is not a pull request: running every area."
   fi
+  # Anything other than a merge commit means the checkout is not the PR merge
+  # ref, so HEAD^1 would not be the base branch tip.
+  if ! git rev-parse --verify --quiet "HEAD^2^{commit}" >/dev/null; then
+    all_true "HEAD is not a pull request merge commit: running every area."
+  fi
   base=HEAD^1
   head=HEAD
 else
@@ -75,8 +80,12 @@ if ! git rev-parse --verify --quiet "${base}^{commit}" >/dev/null ||
 fi
 
 # --no-renames lists both the old and the new path of a moved file, so moving
-# a file out of an area still counts as a change to that area.
-if ! changed=$(git diff --name-only --no-renames "$base" "$head"); then
+# a file out of an area still counts as a change to that area. Paths are read
+# raw (-z, core.quotePath=false): by default git quotes paths with non-ASCII
+# bytes, quotes, backslashes or control characters, and a quoted path such as
+# "backend/\303\251.py" would match no area. pipefail keeps a failing git diff
+# visible to the `if`.
+if ! changed=$(git -c core.quotePath=false diff --name-only --no-renames -z "$base" "$head" | tr '\0' '\n'); then
   all_true "git diff ${base} ${head} failed: running every area."
 fi
 
@@ -89,12 +98,23 @@ else
   echo "  (none)" >&2
 fi
 
+# matches <regex>: true when a changed path matches. A grep error (status > 1)
+# counts as a match, so a broken pattern runs the checks instead of skipping them.
 matches() {
-  if [[ -n "$changed" ]] && grep -Eq "$1" <<<"$changed"; then
-    echo true
-  else
+  local status=0
+  if [[ -z "$changed" ]]; then
     echo false
+    return
   fi
+  grep -Eq "$1" <<<"$changed" || status=$?
+  case $status in
+    0) echo true ;;
+    1) echo false ;;
+    *)
+      echo "grep failed with status ${status}: treating the area as changed." >&2
+      echo true
+      ;;
+  esac
 }
 
 emit \
