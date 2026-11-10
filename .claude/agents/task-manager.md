@@ -35,19 +35,19 @@ You are the **task manager** of the PodiumD Admin Tool team. The team has three 
 ## Copilot reviews
 
 The infonl organisation runs an automatic Copilot code review on every PR, through its ruleset. Collect its findings from two places:
-- **Review threads** (inline comments):
+- **Review threads** (inline comments). The query pages through the threads with a cursor. Read every page before you pick the unresolved threads (`isResolved == false`), because resolved threads count towards each page of 100 too:
   ```
-  gh api graphql -f query='{repository(owner:"infonl",name:"podiumd-admin-tool"){pullRequest(number:N){reviewThreads(first:100){nodes{id isResolved path line comments(first:5){nodes{author{login} body}}}}}}}'
+  gh api graphql --paginate -f query='query($endCursor: String){repository(owner:"infonl",name:"podiumd-admin-tool"){pullRequest(number:N){reviewThreads(first:100, after:$endCursor){nodes{id isResolved path line comments(first:5){nodes{author{login} body}}} pageInfo{hasNextPage endCursor}}}}}'
   ```
-- **Findings in the review body**, e.g. "previously missed issues". These have no thread:
+- **Findings in the review body**, e.g. "previously missed issues". These have no thread. Reviews come back oldest first, 30 per page, so always read all pages:
   ```
-  gh api repos/infonl/podiumd-admin-tool/pulls/N/reviews
+  gh api --paginate repos/infonl/podiumd-admin-tool/pulls/N/reviews
   ```
 
-A review counts as done when a review whose `user.login` is `copilot-pull-request-reviewer[bot]` exists whose `commit_id` equals the PR head SHA. Match the login exactly, with the `[bot]` suffix: the REST reviews endpoint reports it that way (GraphQL `author.login` reports it without the suffix). This prints the `commit_id` of the latest Copilot review, to compare with the head SHA (`gh pr view N --json headRefOid --jq .headRefOid`):
+A review counts as done when a review whose `user.login` is `copilot-pull-request-reviewer[bot]` exists whose `commit_id` equals the PR head SHA. Match the login exactly, with the `[bot]` suffix: the REST reviews endpoint reports it that way (GraphQL `author.login` reports it without the suffix). This prints the `commit_id` of the latest Copilot review across all pages, to compare with the head SHA (`gh pr view N --json headRefOid --jq .headRefOid`):
 
 ```
-gh api repos/infonl/podiumd-admin-tool/pulls/N/reviews --jq '[.[] | select(.user.login=="copilot-pull-request-reviewer[bot]")] | last | .commit_id'
+gh api --paginate repos/infonl/podiumd-admin-tool/pulls/N/reviews --jq '.[] | select(.user.login=="copilot-pull-request-reviewer[bot]") | .commit_id' | tail -n 1
 ```
 
 You can also check that the latest `Copilot` workflow run is `completed`. Wait at most about 15 minutes. If it still hasn't come, report that.
