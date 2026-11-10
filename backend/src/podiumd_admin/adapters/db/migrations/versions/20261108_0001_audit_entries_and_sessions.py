@@ -120,9 +120,13 @@ def upgrade() -> None:
     op.create_index("ix_sessions_last_seen_at", "sessions", ["last_seen_at"])
     op.create_index("ix_sessions_expires_at", "sessions", ["expires_at"])
 
-    # Grants (design D4). PUBLIC has no table privileges by default; revoking
-    # them anyway keeps that true whatever the server's defaults are.
-    op.execute("REVOKE ALL ON audit_entries, sessions FROM PUBLIC")
+    # Grants (design D4). Start from no privileges at all: default privileges
+    # the owner role may have (ALTER DEFAULT PRIVILEGES ... GRANT ALL) would
+    # otherwise give PUBLIC or the app role UPDATE, DELETE or TRUNCATE on
+    # audit_entries, or access to alembic_version, which Alembic creates in
+    # this same session. Then grant exactly what the app role needs; it gets
+    # nothing on alembic_version.
+    op.execute(f"REVOKE ALL ON audit_entries, sessions, alembic_version FROM PUBLIC, {APP_ROLE}")
     op.execute(f"GRANT SELECT, INSERT ON audit_entries TO {APP_ROLE}")
     op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON sessions TO {APP_ROLE}")
 

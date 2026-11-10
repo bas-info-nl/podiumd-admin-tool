@@ -9,10 +9,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+import psycopg.errors
 import pytest
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from sqlalchemy import Engine, create_engine, inspect, text
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.pool import NullPool
 
 from podiumd_admin.adapters.db.tables import metadata
@@ -122,3 +124,54 @@ def test_the_migrations_downgrade_and_upgrade_again(
             assert {"audit_entries", "sessions"} <= set(inspect(connection).get_table_names())
     finally:
         engine.dispose()
+
+
+def test_owner_default_privileges_do_not_widen_the_grants(
+    create_database: Callable[[], Database],
+) -> None:
+    """A DBA's ``ALTER DEFAULT PRIVILEGES ... GRANT ALL`` must not undo design D4."""
+    database = create_database()
+    owner = create_engine(database.owner_url, poolclass=NullPool)
+    try:
+        with owner.begin() as connection:
+            connection.execute(
+                text(
+                    f"ALTER DEFAULT PRIVILEGES FOR ROLE {OWNER_ROLE} "
+                    f"GRANT ALL ON TABLES TO {APP_ROLE}, PUBLIC"
+                )
+            )
+        migrate(database)
+
+        assert _privileges(owner, "audit_entries") == {
+            "SELECT": True,
+            "INSERT": True,
+            "UPDATE": False,
+            "DELETE": False,
+            "TRUNCATE": False,
+        }
+        assert _privileges(owner, "sessions") == {
+            "SELECT": True,
+            "INSERT": True,
+            "UPDATE": True,
+            "DELETE": True,
+            "TRUNCATE": False,
+        }
+        assert not any(_privileges(owner, "alembic_version").values())
+    finally:
+        owner.dispose()
+
+    app = create_engine(database.app_url, poolclass=NullPool)
+    try:
+        for statement in (
+            "UPDATE audit_entries SET action = action",
+            "DELETE FROM audit_entries",
+            "TRUNCATE audit_entries",
+            "TRUNCATE sessions",
+            "SELECT * FROM alembic_version",
+            "UPDATE alembic_version SET version_num = version_num",
+        ):
+            with app.connect() as connection, pytest.raises(ProgrammingError) as raised:
+                connection.execute(text(statement))
+            assert isinstance(raised.value.orig, psycopg.errors.InsufficientPrivilege), statement
+    finally:
+        app.dispose()
