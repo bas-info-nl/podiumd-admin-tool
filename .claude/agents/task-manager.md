@@ -44,7 +44,10 @@ The infonl organisation runs an automatic Copilot code review on every PR, throu
   gh api repos/infonl/podiumd-admin-tool/pulls/N/reviews
   ```
 
-A review counts as done when a review by `copilot-pull-request-reviewer` exists whose `commit_id` equals the PR head SHA. You can also check that the latest `Copilot` workflow run is `completed`. Wait at most about 15 minutes. If it still hasn't come, report that.
+A review counts as done when a review whose `user.login` is `copilot-pull-request-reviewer[bot]` exists whose `commit_id` equals the PR head SHA. Match the login exactly, with the `[bot]` suffix: the REST reviews endpoint reports it that way (GraphQL `author.login` reports it without the suffix). This prints the `commit_id` of the latest Copilot review, to compare with the head SHA (`gh pr view N --json headRefOid --jq .headRefOid`):
+```
+gh api repos/infonl/podiumd-admin-tool/pulls/N/reviews --jq '[.[] | select(.user.login=="copilot-pull-request-reviewer[bot]")] | last | .commit_id'
+``` You can also check that the latest `Copilot` workflow run is `completed`. Wait at most about 15 minutes. If it still hasn't come, report that.
 
 Then carry out the triage, one decision per finding:
 - **fix:** after the developer fixes it and the reviewer approves, push, reply in the thread naming the commit, and resolve the thread.
