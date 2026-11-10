@@ -69,6 +69,23 @@ const TRIAGE = { type: 'object', properties: {
   }, required: ['id', 'decision', 'reason', 'reply'] } },
   summary: { type: 'string' },
 }, required: ['decisions', 'summary'] }
+const PREPARE = { type: 'object', properties: {
+  prepared: { type: 'boolean', description: 'true only when the feature branch was created from origin/main and is checked out' },
+  brief: { type: 'string', description: 'the brief for the senior-developer (empty when not prepared)' },
+  reason: { type: 'string', description: 'why the branch was not prepared (empty when prepared)' },
+}, required: ['prepared', 'brief', 'reason'] }
+const APPLY = { type: 'object', properties: {
+  results: { type: 'array', items: { type: 'object', properties: {
+    id: { type: 'string' },
+    done: { type: 'boolean', description: 'true only when the reply/comment (and issue, for follow-up) exists and the thread is resolved' },
+    link: { type: 'string', description: 'issue or comment URL, when there is one' },
+    note: { type: 'string' },
+  }, required: ['id', 'done', 'note'] } },
+  summary: { type: 'string' },
+}, required: ['results', 'summary'] }
+
+// Keep every earlier reply whose id the newer report dropped.
+const mergeReplies = (previous, current) => [...current, ...previous.filter(p => !current.some(c => c.id === p.id))]
 
 // Developer -> reviewer loop. Returns { dev, review, history }.
 async function buildAndReview(devPrompt, scope, label) {
@@ -83,9 +100,11 @@ async function buildAndReview(devPrompt, scope, label) {
     history.push({ round, approved: review.approved, blocking: review.blocking })
     log(`${label} review round ${round}: ${review.approved ? 'APPROVED' : review.blocking.length + ' blocking'}`)
     if (review.approved || round === MAX_REVIEW_ROUNDS) break
-    dev = await agent(`${role('senior-developer')}\n${CTX}\nThe code-reviewer did not approve. Fix every blocking issue, re-run all checks, commit locally (no push). Keep your per-finding replies up to date.\nREVIEW: ${JSON.stringify(review)}`,
+    const previous = dev
+    dev = await agent(`${role('senior-developer')}\n${CTX}\nThe code-reviewer did not approve. Fix every blocking issue, re-run all checks, commit locally (no push). Return a reply for every finding id in the original assignment: carry over your previous replies and update them where this round changes them.\nORIGINAL ASSIGNMENT: ${devPrompt}\nPREVIOUS REPORT: ${JSON.stringify(previous)}\nREVIEW: ${JSON.stringify(review)}`,
       { label: `senior-developer:${label}-fix-${round}`, phase: 'Implement', schema: DEV })
     if (!dev) throw new Error('senior-developer failed')
+    dev = { ...dev, replies: mergeReplies(previous.replies, dev.replies) }
   }
   return { dev, review, history }
 }
@@ -96,11 +115,12 @@ const result = { mode: MODE, branch: BRANCH }
 if (MODE === 'implement') {
   const TASKS = A.tasks, GROUP = A.group
   phase('Prepare')
-  const brief = await agent(`${role('task-manager')}\n${CTX}\nPrepare task group ${GROUP} (tasks ${TASKS}) of openspec/changes/${CHANGE}/tasks.md: create ${BRANCH} from origin/main and return the brief for the senior-developer.`, { label: 'task-manager:prepare', phase: 'Prepare' })
-  if (!brief) throw new Error('task-manager failed to prepare')
+  const prep = await agent(`${role('task-manager')}\n${CTX}\nPrepare task group ${GROUP} (tasks ${TASKS}) of openspec/changes/${CHANGE}/tasks.md: create ${BRANCH} from origin/main and return the brief for the senior-developer. Set prepared to true only when ${BRANCH} was created from origin/main and is checked out; otherwise (e.g. the branch already exists, or the tree is not clean) set prepared to false and give the reason.`, { label: 'task-manager:prepare', phase: 'Prepare', schema: PREPARE })
+  if (!prep) throw new Error('task-manager failed to prepare')
+  if (prep.prepared !== true) throw new Error('task-manager did not prepare the branch: ' + prep.reason)
 
   const scope = `tasks ${TASKS} of openspec/changes/${CHANGE}/tasks.md${A.devExtra ? '; additional in-scope work: ' + A.devExtra : ''}`
-  const built = await buildAndReview(`Implement ${scope}.\nBrief from the task-manager:\n${brief}`, scope, 'implement')
+  const built = await buildAndReview(`Implement ${scope}.\nBrief from the task-manager:\n${prep.brief}`, scope, 'implement')
   result.implementation = { approved: built.review.approved, rounds: built.history.length, review: built.review, dev: built.dev }
 
   phase('Deliver')
@@ -115,6 +135,8 @@ result.pr = pr
 // Copilot / CI feedback loop
 phase('Copilot')
 const handled = []
+// Findings whose reply, comment or issue the task-manager could not complete.
+const unapplied = []
 result.copilotRounds = []
 let lastCiPassed = true
 // True when commits were pushed after the last collection, so the last
@@ -173,12 +195,27 @@ for (let round = 1; round <= MAX_COPILOT_ROUNDS; round++) {
     }
   }
 
-  const applied = await agent(`${role('task-manager')}\n${CTX}\nApply the code-reviewer's triage of the Copilot findings on PR #${pr} (see "Copilot reviews" in your role):\n${fixes.length ? `1. Push the approved fix commits on ${BRANCH}.\n` : ''}2. For each decision: fix -> reply with the developer's reply (naming the commit) and resolve; follow-up -> create the GitHub issue (label follow-up plus bug or enhancement), reply with its link and resolve; decline -> reply with the reason and resolve. Review-body findings (id starts with "body:") have no thread: cover them in one PR comment.\n${fixes.length ? `3. Request a new Copilot review: gh pr edit ${pr} --add-reviewer @copilot\n` : ''}No @mentions. Do not merge. Report what you did per id.\nTRIAGE: ${JSON.stringify(triage.decisions)}\nDEVELOPER REPLIES: ${JSON.stringify(fixResult ? fixResult.dev.replies : [])}`,
-    { label: `task-manager:apply-${round}`, phase: 'Copilot' })
-  // Only mark findings handled once their replies/issues actually exist.
+  const applied = await agent(`${role('task-manager')}\n${CTX}\nApply the code-reviewer's triage of the Copilot findings on PR #${pr} (see "Copilot reviews" in your role):\n${fixes.length ? `1. Push the approved fix commits on ${BRANCH}.\n` : ''}2. For each decision: fix -> reply with the developer's reply (naming the commit) and resolve; follow-up -> create the GitHub issue (label follow-up plus bug or enhancement), reply with its link and resolve; decline -> reply with the reason and resolve. Review-body findings (id starts with "body:") have no thread: cover them in one PR comment.\n${fixes.length ? `3. Request a new Copilot review: gh pr edit ${pr} --add-reviewer @copilot\n` : ''}No @mentions. Do not merge. Return one result per finding id: done is true only when its reply/comment (and issue, for follow-up) actually exists and its thread is resolved; otherwise done is false with the error in note.\nTRIAGE: ${JSON.stringify(triage.decisions)}\nDEVELOPER REPLIES: ${JSON.stringify(fixResult ? fixResult.dev.replies : [])}`,
+    { label: `task-manager:apply-${round}`, phase: 'Copilot', schema: APPLY })
   if (!applied) throw new Error('task-manager failed to apply the triage')
+  entry.applied = applied
   if (fixes.length) pushedSinceCollect = true
-  handled.push(...fb.findings.map(f => ({ id: f.id, path: f.path, line: f.line, gist: f.body.slice(0, 120) })))
+  // Only mark findings handled once their replies/issues actually exist; the
+  // rest are collected again (threads stay unresolved) and reported at handover.
+  const doneIds = new Set(applied.results.filter(r => r.done === true).map(r => r.id))
+  const summarize = f => ({ id: f.id, path: f.path, line: f.line, gist: f.body.slice(0, 120) })
+  handled.push(...fb.findings.filter(f => doneIds.has(f.id)).map(summarize))
+  for (const f of fb.findings.filter(f => !doneIds.has(f.id))) {
+    const r = applied.results.find(x => x.id === f.id)
+    const item = { ...summarize(f), note: r ? r.note : 'no result reported by the task-manager' }
+    const i = unapplied.findIndex(u => u.id === f.id)
+    if (i >= 0) unapplied[i] = item
+    else unapplied.push(item)
+  }
+  // A later round may complete a finding that failed earlier.
+  for (let i = unapplied.length - 1; i >= 0; i--) if (doneIds.has(unapplied[i].id)) unapplied.splice(i, 1)
+  const failedHere = fb.findings.filter(f => !doneIds.has(f.id)).map(f => f.id)
+  if (failedHere.length) entry.failed = unapplied.filter(u => failedHere.includes(u.id))
   // Nothing pushed and CI green: Copilot will not review again, so we are done.
   // With CI red, continue: the threads are resolved now, so the next round
   // collects no findings and takes the CI-repair branch.
@@ -199,6 +236,7 @@ if (pushedSinceCollect) {
   }
   result.copilotRounds.push(entry)
 }
+if (unapplied.length) result.unappliedFindings = unapplied
 if (!lastCiPassed) {
   // The loop ended (round budget exhausted or a fix not approved) while the
   // last observed CI run was red.
@@ -207,7 +245,7 @@ if (!lastCiPassed) {
   result.ciStillFailing = true
 }
 
-const report = await agent(`${role('task-manager')}\n${CTX}\nFinal hand-over for PR #${pr}: confirm there are no unresolved review threads and report the required checks ('gh pr checks ${pr} --required'). Switch the local checkout back to main ('git switch main && git pull --ff-only'). Return a concise message to the user: PR URL, CI results, what happened with the Copilot findings (fixed / follow-up issues with links / declined), and ask them to review before the next task group starts. Do not merge.${result.copilotTimedOut ? `\nIMPORTANT: the Copilot review was NOT received within the wait window (timeout). Tell the user the Copilot review is still outstanding and must be checked before merging.` : ''}${result.ciStillFailing ? `\nIMPORTANT: the Copilot loop ended while the last observed CI run was failing. Tell the user CI is red and needs attention.` : ''}${result.outstandingFindings ? `\nIMPORTANT: the Copilot round budget is exhausted and these findings on the final head were NOT handled: ${JSON.stringify(result.outstandingFindings)}. List them as outstanding for the user.` : ''}\nCopilot rounds: ${JSON.stringify(result.copilotRounds)}`,
+const report = await agent(`${role('task-manager')}\n${CTX}\nFinal hand-over for PR #${pr}: confirm there are no unresolved review threads and report the required checks ('gh pr checks ${pr} --required'). Switch the local checkout back to main ('git switch main && git pull --ff-only'). Return a concise message to the user: PR URL, CI results, what happened with the Copilot findings (fixed / follow-up issues with links / declined), and ask them to review before the next task group starts. Do not merge.${result.copilotTimedOut ? `\nIMPORTANT: the Copilot review was NOT received within the wait window (timeout). Tell the user the Copilot review is still outstanding and must be checked before merging.` : ''}${result.ciStillFailing ? `\nIMPORTANT: the Copilot loop ended while the last observed CI run was failing. Tell the user CI is red and needs attention.` : ''}${result.outstandingFindings ? `\nIMPORTANT: the Copilot round budget is exhausted and these findings on the final head were NOT handled: ${JSON.stringify(result.outstandingFindings)}. List them as outstanding for the user.` : ''}${result.unappliedFindings ? `\nIMPORTANT: the reply, comment or issue for these Copilot findings could NOT be applied: ${JSON.stringify(result.unappliedFindings)}. List them as outstanding for the user.` : ''}\nCopilot rounds: ${JSON.stringify(result.copilotRounds)}`,
   { label: 'task-manager:handover', phase: 'Copilot' })
 result.handover = report
 return result
