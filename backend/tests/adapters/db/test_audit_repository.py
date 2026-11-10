@@ -20,7 +20,14 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from podiumd_admin.adapters.db.audit import SqlAuditRepository
 from podiumd_admin.adapters.db.tables import STORED_REASONS
-from podiumd_admin.domain.audit import AuditEntry, Outcome, ReasonCode
+from podiumd_admin.domain.audit import (
+    MAX_PARAMETER_KEY_LENGTH,
+    MAX_PARAMETER_VALUE_LENGTH,
+    AuditEntry,
+    Outcome,
+    ReasonCode,
+)
+from podiumd_admin.domain.audit_log import AuditLogQuery
 from podiumd_admin.domain.environment import EnvironmentIdentity, Stage
 from podiumd_admin.ports.audit import AuditLogReader, AuditRepository
 
@@ -70,6 +77,20 @@ async def test_a_stored_entry_reads_back_with_every_field(app_engine: AsyncEngin
     await _add(app_engine, entry)
 
     assert await _get(app_engine, entry.id) == entry
+
+
+async def test_an_entry_with_truncated_parameters_reads_back(app_engine: AsyncEngine) -> None:
+    long_name = "component_" + "n" * MAX_PARAMETER_KEY_LENGTH
+    entry = _entry(parameters={long_name: "v" * (MAX_PARAMETER_VALUE_LENGTH + 1)})
+    (stored_name,) = entry.parameters
+    assert stored_name != long_name
+
+    await _add(app_engine, entry)
+
+    assert await _get(app_engine, entry.id) == entry
+    async with app_engine.connect() as connection:
+        page = await SqlAuditRepository(connection).search(AuditLogQuery())
+    assert list(page.entries) == [entry]
 
 
 async def test_an_entry_without_optional_fields_reads_back(app_engine: AsyncEngine) -> None:

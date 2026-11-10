@@ -220,6 +220,11 @@ def _parameters(value: object) -> Mapping[str, ParameterValue]:
                 f"parameter {key!r} must be text, a whole number, a boolean or None"
             )
         name = _truncate(key.strip(), MAX_PARAMETER_KEY_LENGTH)
+        # Truncation can turn a harmless name into a secret-like one, such as
+        # ``..._tokenizer_name`` into ``..._token…``. Reject it here, so every
+        # accepted entry is accepted again when it is read back.
+        if is_secret_like(name):
+            raise SecretParameterError(key)
         if name in result:
             raise InvalidAuditEntryError(f"parameter names collide after truncation: {name!r}")
         result[name] = (
