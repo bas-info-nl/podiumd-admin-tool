@@ -191,7 +191,8 @@ if (pushedSinceCollect) {
   const fb = await collect('task-manager:final-collect')
   log(`Final collection: CI ${fb.ciPassed ? 'green' : 'RED'}, Copilot ${fb.copilotReviewed ? 'reviewed' : 'not reviewed'}, ${fb.findings.length} outstanding finding(s)`)
   const entry = { round: 'final', ci: fb.ciSummary, copilotReviewed: fb.copilotReviewed, findings: fb.findings.length }
-  if (!fb.copilotReviewed) entry.note = `Copilot review of head ${fb.headSha} not received within the wait window (timeout)`
+  if (!fb.ciPassed) entry.note = 'CI failing — needs attention'
+  if (!fb.copilotReviewed) entry.note = `Copilot review of head ${fb.headSha} not received within the wait window (timeout)${fb.ciPassed ? '' : '; CI failing'}`
   if (fb.findings.length) {
     entry.outstanding = fb.findings.map(f => ({ id: f.id, path: f.path, line: f.line, gist: f.body.slice(0, 120) }))
     result.outstandingFindings = entry.outstanding
