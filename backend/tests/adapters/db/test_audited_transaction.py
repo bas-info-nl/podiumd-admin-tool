@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from podiumd_admin.adapters.db.audit import SqlAuditRepository
@@ -196,3 +196,21 @@ async def test_no_entry_is_written_when_a_swallowed_insert_failure_aborted_the_t
     assert sink.stored == []
     assert [failed for failed, _ in sink.write_failures] == [denial]
     assert not await _stored(app_engine, first)
+
+
+async def test_no_entry_is_written_when_a_swallowed_action_failure_aborted_the_transaction(
+    app_engine: AsyncEngine,
+) -> None:
+    # Any failing statement aborts a PostgreSQL transaction. When the caller
+    # swallows the error, the commit raises nothing but rolls back, so the
+    # entry inserted before it was never stored.
+    sink = FakeAuditSink()
+    entry = _entry()
+
+    async with audited_transaction(app_engine, sink) as transaction:
+        await transaction.audit_repository.add(entry)
+        with pytest.raises(DBAPIError):
+            await transaction.connection.execute(text("SELECT 1/0"))
+
+    assert sink.stored == []
+    assert not await _stored(app_engine, entry)

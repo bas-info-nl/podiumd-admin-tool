@@ -9,9 +9,11 @@ Audit Entry that was not stored.
 transaction has committed, it writes those entries to the ``AuditSink``, in
 order and once each. On a rollback or a failed commit nothing is written.
 
-If an insert fails, PostgreSQL aborts the whole transaction, so none of its
-entries can be committed, even when the caller swallows the error (as
-``AuditRecorder.record_denial`` does). Nothing is written for such a
+If any statement fails, PostgreSQL aborts the whole transaction, so none of
+its entries can be committed, even when the caller swallows the error (as
+``AuditRecorder.record_denial`` does for a failed insert). The commit then
+raises nothing but rolls back. So before the commit the hook reads the
+transaction status from the driver, and writes nothing for an aborted
 transaction. Savepoints are not supported: an entry inserted under a
 savepoint that is later rolled back would still be written.
 """
@@ -22,6 +24,7 @@ import contextlib
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 
+from psycopg.pq import TransactionStatus
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from podiumd_admin.adapters.db.audit import SqlAuditRepository
@@ -35,15 +38,20 @@ class _RememberingAuditRepository:
 
     repository: SqlAuditRepository
     inserted: list[AuditEntry] = field(default_factory=list)
-    failed: bool = False
 
     async def add(self, entry: AuditEntry) -> None:
-        try:
-            await self.repository.add(entry)
-        except Exception:
-            self.failed = True
-            raise
+        await self.repository.add(entry)
         self.inserted.append(entry)
+
+
+async def _is_aborted(connection: AsyncConnection) -> bool:
+    """Whether a failed statement has aborted the open transaction."""
+    raw = await connection.get_raw_connection()
+    driver_connection = raw.driver_connection
+    if driver_connection is None:  # pragma: no cover - a checked-out connection always has one
+        return True
+    status: TransactionStatus = driver_connection.info.transaction_status
+    return status == TransactionStatus.INERROR
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,7 +76,9 @@ async def audited_transaction(
     async with engine.begin() as connection:
         repository = _RememberingAuditRepository(SqlAuditRepository(connection))
         yield AuditedTransaction(connection=connection, audit_repository=repository)
-    if repository.failed:
+        # The commit of an aborted transaction raises nothing but rolls back.
+        aborted = await _is_aborted(connection)
+    if aborted:
         return
     for entry in repository.inserted:
         with contextlib.suppress(Exception):
