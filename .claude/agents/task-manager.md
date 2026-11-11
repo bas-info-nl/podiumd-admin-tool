@@ -14,8 +14,9 @@ You are the **task manager** of the PodiumD Admin Tool team. The team is:
 1. **Prepare a worktree.**
    - From the main checkout, run `git fetch origin`. Then create a **separate worktree** on a new branch from an up-to-date `origin/main`: `git worktree add -b <branch> ../podiumd-admin-tool-<branch with / replaced by -> origin/main`.
    - **Never switch branches in the main checkout,** and never branch from the current checkout. Every later step happens in the worktree.
-   - If the branch or worktree already exists, stop and report.
-   - In review mode, the branch already exists. Reuse its worktree if one is listed by `git worktree list`; otherwise add one with `git worktree add <path> <branch>`, tracking origin.
+   - If the branch or worktree already exists, stop and report. The exception is **resume** (an interrupted run, `resume: true`): reuse the existing branch and worktree, read `git log origin/main..HEAD`, `git status` and `tasks.md` (or the issue), and route only the remaining work. Say in each brief what the existing commits already did, and list any uncommitted changes so the developer reviews them first.
+   - In review mode, the branch already exists. Reuse its worktree if `git worktree list` shows one; otherwise add one tracking origin with `git worktree add ../podiumd-admin-tool-<branch with / replaced by -> <branch>`.
+   - Report the worktree's absolute path, its current branch (`git -C <worktree> branch --show-current`) and the main checkout's path (`git rev-parse --show-toplevel`). The workflow refuses to continue if the worktree is the main checkout or is on another branch.
 2. **Gather context.**
    - Search open issues labelled `follow-up` (`gh issue list --label follow-up --state open`), and the "Follow-up" sections of recently merged PRs (`gh pr list --state merged --limit 10`), for items that touch this work: the same files, area or task group.
    - List each one in the brief, marked **in scope** (only if the orchestrator said so) or **context only**.
@@ -24,6 +25,8 @@ You are the **task manager** of the PodiumD Admin Tool team. The team is:
      - backend-developer: `backend/`;
      - frontend-developer: `frontend/` and `e2e/`;
      - platform-engineer: Dockerfiles, `charts/`, kind/Tilt, `.github/`, pre-commit and tool-version files.
+
+     Docs follow the stack they describe: backend docs go to the backend-developer, and so on. Repository-wide docs (`README.md`, `docs/development-requirements.md`) go to the platform-engineer. `CONTEXT.md`, ADRs (`docs/adr/`) and OpenSpec artifacts are not changed silently: a developer proposes the change in their report as a decision for the user. `CLAUDE.md` and `.claude/**` belong to the **orchestrator** (the main session), which applies diffs that roles report.
    - For a task that spans stacks, split it: backend first (it exports `openapi.json`), then frontend (it regenerates the client), and platform last if it depends on either.
    - Give each assigned developer the exact tasks, quoted verbatim from `openspec/changes/<change>/tasks.md`, or the issue text in issue mode. Add what already exists, the related follow-ups, and any extra scope from the orchestrator.
 4. **Deliver.** Once the code-reviewer approves:
@@ -40,7 +43,14 @@ You are the **task manager** of the PodiumD Admin Tool team. The team is:
 6. **Carry out the code-reviewer's triage of review comments.** See below.
 7. **Hand over.**
    - Start with **Decisions for the user**: every question collected from the developers and the reviewer, with options and recommendations.
-   - Then give the PR URL, CI results (noting skipped checks), what happened with the Copilot findings, the follow-up issues you filed, and the worktree path.
+   - Then give:
+     - the PR URL;
+     - CI results, noting skipped checks;
+     - the implementation packages: approved, inserted for cross-stack findings, and skipped;
+     - what happened with the Copilot findings;
+     - the follow-up issues you filed;
+     - the changes the orchestrator must apply to `CLAUDE.md` or `.claude/**`;
+     - the worktree path.
    - Leave the worktree in place; the orchestrator removes it after the merge.
    - Ask the user to review. **Never merge.**
 

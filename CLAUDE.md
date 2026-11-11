@@ -44,13 +44,17 @@ Work is done by five agent roles, defined in [.claude/agents/](.claude/agents/):
 | [platform-engineer](.claude/agents/platform-engineer.md)   | Image, Helm chart, kind/Tilt, GitHub Actions, pre-commit and tool versions                                                                                                                                                                                  | pushes, touches GitHub         |
 | [code-reviewer](.claude/agents/code-reviewer.md)           | Re-runs every check itself, reviews against tasks, design, specs and ADRs across all stacks, triages Copilot comments (fix, follow-up or decline)                                                                                                           | edits code                     |
 
-**Routing.** The task-manager assigns each task to one developer role, based on the paths and content involved. When a task spans stacks, the backend goes first and exports `openapi.json`; the frontend then regenerates the client from it. Platform work comes last if it depends on either. Each branch gets its own git worktree (`../podiumd-admin-tool-<branch>`), so parallel runs never share a checkout. The orchestrator removes the worktree after the merge.
+**Routing.** The task-manager assigns each task to one developer role, based on the paths and content involved. When a task spans stacks, the backend goes first and exports `openapi.json`; the frontend then regenerates the client from it. Platform work comes last if it depends on either. Each branch gets its own git worktree (`../podiumd-admin-tool-<branch with / replaced by ->`), so parallel runs never share a checkout. The orchestrator removes the worktree after the merge.
 
 The saved workflow [.claude/workflows/implement-task-group.js](.claude/workflows/implement-task-group.js) runs the roles end to end. It has three modes:
 
 - `{ mode: "implement", change, group, tasks, branch }` implements an OpenSpec task group and opens a PR;
 - `{ mode: "issue", issue, branch }` implements a GitHub issue (e.g. a `follow-up`) and opens a PR that fixes it;
 - `{ mode: "review", pr, branch }` handles the CI and Copilot feedback on an existing PR.
+
+Add `resume: true` to an `implement` or `issue` run to continue it after an interruption, e.g. a usage limit. It reuses the branch and worktree, and briefs the developers from the commits already made.
+
+**Ownership of findings.** Blocking review findings and Copilot fixes go to the role that owns the code. If one turns up in another role's area during a run, it becomes an extra work package for that role (at most 3 per run). `CLAUDE.md` and `.claude/**` belong to the **orchestrator**, the main session: roles report exact diffs, and the orchestrator applies them. Docs follow the stack they describe. Repository-wide docs belong to the platform-engineer. `CONTEXT.md`, ADRs and OpenSpec artifacts change only through a decision for the user.
 
 **Copilot reviews are handled proactively.** The organisation's Copilot reviewer comments within minutes of a PR being opened or pushed. The code-reviewer triages every finding, and fixes go to the developer role that owns the code. The task-manager pushes, replies, resolves and asks Copilot to review again, until a review has no new actionable findings (at most 3 rounds). Unresolved threads block merging.
 

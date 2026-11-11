@@ -1,40 +1,47 @@
 export const meta = {
   name: 'implement-task-group',
   description: 'Task manager / specialist developers / code reviewer: implement an OpenSpec task group or a GitHub issue as a PR in its own worktree, then handle CI and Copilot review comments until clean',
-  whenToUse: 'Implement one task group of an OpenSpec change (mode "implement"), one GitHub issue (mode "issue"), or handle the CI and Copilot feedback of an existing PR (mode "review"). Roles live in .claude/agents/.',
+  whenToUse: 'Implement one task group of an OpenSpec change (mode "implement"), one GitHub issue (mode "issue"), or handle the CI and Copilot feedback of an existing PR (mode "review"). Add resume: true to continue an interrupted implement/issue run. Roles live in .claude/agents/.',
   phases: [
-    { title: 'Prepare', detail: 'task-manager creates the worktree and branch, gathers follow-ups, routes tasks' },
+    { title: 'Prepare', detail: 'task-manager creates (or resumes) the worktree and branch, gathers follow-ups, routes tasks' },
     { title: 'Implement', detail: 'backend-developer / frontend-developer / platform-engineer write code and tests' },
-    { title: 'Review', detail: 'code-reviewer re-runs checks and reviews; loops back to the owning developer' },
+    { title: 'Review', detail: 'code-reviewer re-runs checks and reviews; blocking issues go to the owning role' },
     { title: 'Deliver', detail: 'task-manager files follow-ups, pushes and opens the PR' },
     { title: 'Copilot', detail: 'wait for CI + Copilot, triage, fix, reply, resolve, re-request' },
   ],
 }
 
 // args:
-//   implement: { mode: 'implement', change, group, tasks, branch, devExtra?, extra? }
-//   issue:     { mode: 'issue', issue, branch, devExtra?, extra? }
-//   review:    { mode: 'review', pr, branch }
+//   implement: { mode: 'implement', change, group, tasks, branch, devExtra?, extra?, resume? }
+//   issue:     { mode: 'issue', issue, branch, devExtra?, extra?, resume? }
+//   review:    { mode: 'review', pr, branch, root? }
 //   all:       main? - absolute path of the main checkout (default: the
 //              current working directory). Work happens in a separate git
-//              worktree per branch, created by the task-manager; root? may
-//              point at an existing worktree (review mode) to skip that step.
+//              worktree per branch, created by the task-manager; in review
+//              mode root? may point at an existing worktree.
+//   resume:    true continues an interrupted implement/issue run on the
+//              existing branch and worktree, briefed from the commits made so far.
 const REPO = 'infonl/podiumd-admin-tool'
 const A = args || {}
 const MODE = A.mode || 'implement'
 const CHANGE = A.change || 'add-foundation'
 const BRANCH = A.branch
-const MAIN = A.main || null
+const MAIN = A.main ? A.main.replace(/\/+$/, '') : null
+const RESUME = A.resume === true
 const MAX_REVIEW_ROUNDS = 4
 const MAX_COPILOT_ROUNDS = 3
+const MAX_INSERTED_PACKAGES = 3
 const DEV_ROLES = ['backend-developer', 'frontend-developer', 'platform-engineer']
+// 'orchestrator' owns CLAUDE.md and .claude/**: findings there become exact diffs for the main session.
+const OWNERS = [...DEV_ROLES, 'orchestrator']
 if (!BRANCH) throw new Error('args.branch is required')
 if (!['implement', 'issue', 'review'].includes(MODE)) throw new Error(`unknown mode ${MODE}`)
 if (MODE === 'issue' && !A.issue) throw new Error('args.issue is required in issue mode')
 if (MODE === 'review' && !A.pr) throw new Error('args.pr is required in review mode')
+if (A.root && (!A.root.startsWith('/') || (MAIN && A.root.replace(/\/+$/, '') === MAIN))) throw new Error('args.root must be an absolute worktree path, not the main checkout')
 
 // The worktree every agent works in, once the task-manager has prepared it.
-let WORK = A.root || null
+let WORK = A.root ? A.root.replace(/\/+$/, '') : null
 const at = rel => (WORK ? `${WORK}/${rel}` : rel)
 const role = name => `You are the ${name.toUpperCase()}. First read and follow your role definition in ${at(`.claude/agents/${name}.md`)}, and the repository rules in ${at('CLAUDE.md')} (developer roles: especially "Developer rules").`
 const ctx = () => `Work ONLY in the git worktree ${WORK} (GitHub ${REPO}, branch ${BRANCH}). Never switch branches in the main checkout${MAIN ? ' ' + MAIN : ''}.`
@@ -51,27 +58,30 @@ const DEV = { type: 'object', properties: {
   checksPassed: { type: 'boolean' },
   commits: { type: 'array', items: { type: 'string' } },
   decisions: DECISIONS,
-  handoff: { type: 'string', description: 'notes for the next developer role (e.g. changed API endpoints/models and openapi.json), or exact diffs for CLAUDE.md / .claude/** for the orchestrator' },
+  nextRole: { type: 'string', description: 'hand-off notes for the next developer role, e.g. changed API endpoints/models and the exported openapi.json' },
+  orchestrator: { type: 'string', description: 'exact diffs for CLAUDE.md or .claude/** that the orchestrator must apply' },
 }, required: ['summary', 'done', 'notDone', 'replies', 'checksPassed', 'commits', 'decisions'] }
 const REVIEW = { type: 'object', properties: {
   approved: { type: 'boolean' },
-  checksRun: { type: 'array', items: { type: 'object', properties: { command: { type: 'string' }, passed: { type: 'boolean' }, exitCode: { type: 'integer' }, note: { type: 'string' } }, required: ['command', 'passed', 'note'] } },
-  blocking: { type: 'array', items: { type: 'object', properties: { file: { type: 'string' }, issue: { type: 'string' }, fix: { type: 'string' }, owner: { type: 'string', enum: DEV_ROLES } }, required: ['file', 'issue', 'fix', 'owner'] } },
-  suggestions: { type: 'array', items: { type: 'object', properties: { text: { type: 'string' }, later: { type: 'string', description: 'non-empty when this belongs to later work (e.g. "task group 6"): the task-manager files it as a follow-up issue' } }, required: ['text'] } },
+  checksRun: { type: 'array', items: { type: 'object', properties: { command: { type: 'string' }, passed: { type: 'boolean' }, exitCode: { type: 'integer', description: '-1 when not applicable' }, note: { type: 'string' } }, required: ['command', 'passed', 'exitCode', 'note'] } },
+  blocking: { type: 'array', items: { type: 'object', properties: { file: { type: 'string' }, issue: { type: 'string' }, fix: { type: 'string' }, owner: { type: 'string', enum: OWNERS } }, required: ['file', 'issue', 'fix', 'owner'] } },
+  suggestions: { type: 'array', items: { type: 'object', properties: { text: { type: 'string' }, later: { type: 'string', description: 'non-empty when this belongs to later work (e.g. "task group 6"): it is filed as a follow-up issue' } }, required: ['text'] } },
   decisions: DECISIONS,
   summary: { type: 'string' },
 }, required: ['approved', 'checksRun', 'blocking', 'suggestions', 'decisions', 'summary'] }
 const PREPARE = { type: 'object', properties: {
-  prepared: { type: 'boolean', description: 'true only when the worktree exists on the feature branch, created from (or in review mode tracking) origin' },
+  prepared: { type: 'boolean', description: 'true only when the worktree exists on the feature branch, created from (or, in review/resume mode, tracking) origin' },
   worktree: { type: 'string', description: 'absolute path of the worktree' },
+  branch: { type: 'string', description: "output of 'git -C <worktree> branch --show-current'" },
+  mainCheckout: { type: 'string', description: "output of 'git rev-parse --show-toplevel' in the main checkout" },
   assignments: { type: 'array', description: 'ordered work packages; cross-stack: backend first, then frontend, then platform', items: { type: 'object', properties: {
     role: { type: 'string', enum: DEV_ROLES },
     tasks: { type: 'string', description: 'the exact tasks / part of the issue for this role, quoted verbatim' },
-    brief: { type: 'string', description: 'what already exists, related follow-ups (in scope / context only), hand-off expectations' },
+    brief: { type: 'string', description: 'what already exists (in resume mode: what the commits so far already did), related follow-ups (in scope / context only), hand-off expectations' },
   }, required: ['role', 'tasks', 'brief'] } },
   relatedFollowUps: { type: 'array', items: { type: 'string' } },
   reason: { type: 'string', description: 'why not prepared (empty when prepared)' },
-}, required: ['prepared', 'worktree', 'assignments', 'relatedFollowUps', 'reason'] }
+}, required: ['prepared', 'worktree', 'branch', 'mainCheckout', 'assignments', 'relatedFollowUps', 'reason'] }
 const DELIVERY = { type: 'object', properties: {
   created: { type: 'boolean', description: 'true only if gh pr create succeeded (or an open PR for this exact branch already exists)' },
   pr: { type: 'integer', description: 'the PR number; 0 when created is false' },
@@ -99,14 +109,15 @@ const TRIAGE = { type: 'object', properties: {
   decisions: { type: 'array', items: { type: 'object', properties: {
     id: { type: 'string' },
     decision: { type: 'string', enum: ['fix', 'follow-up', 'decline'] },
-    owner: { type: 'string', enum: [...DEV_ROLES, 'none'], description: 'for fix: the developer role whose area the code is in' },
+    owner: { type: 'string', enum: [...OWNERS, 'none'], description: 'for fix: the role whose area the code is in (orchestrator for CLAUDE.md and .claude/**)' },
     reason: { type: 'string' },
-    expectedFix: { type: 'string', description: 'for fix: what to change and which test proves it' },
+    expectedFix: { type: 'string', description: 'for fix: what to change and which test proves it (for orchestrator: the exact diff)' },
     issueTitle: { type: 'string' }, issueBody: { type: 'string' },
     reply: { type: 'string', description: 'text for the PR thread (decline/follow-up); for fix the developer supplies the final reply' },
   }, required: ['id', 'decision', 'owner', 'reason', 'reply'] } },
+  userDecisions: DECISIONS,
   summary: { type: 'string' },
-}, required: ['decisions', 'summary'] }
+}, required: ['decisions', 'userDecisions', 'summary'] }
 const APPLY = { type: 'object', properties: {
   results: { type: 'array', items: { type: 'object', properties: {
     id: { type: 'string' },
@@ -117,51 +128,88 @@ const APPLY = { type: 'object', properties: {
   summary: { type: 'string' },
 }, required: ['results', 'summary'] }
 
-const result = { mode: MODE, branch: BRANCH, decisions: [], handoffs: [] }
-const addDecisions = (from, list) => { for (const d of list || []) result.decisions.push({ from, ...d }) }
+const result = { mode: MODE, branch: BRANCH, resume: RESUME, decisions: [], deferred: [], orchestrator: [] }
+const keyOf = s => String(s || '').trim().toLowerCase()
+const addDecisions = (from, list) => {
+  for (const d of list || []) if (!result.decisions.some(x => keyOf(x.question) === keyOf(d.question))) result.decisions.push({ from, ...d })
+}
+const addDeferred = (from, review) => {
+  for (const s of (review && review.suggestions) || []) if (s.later && !result.deferred.some(x => keyOf(x.text) === keyOf(s.text))) result.deferred.push({ from, ...s })
+}
+const addOrchestrator = (from, note) => {
+  if (note && !result.orchestrator.some(x => keyOf(x.note) === keyOf(note))) result.orchestrator.push({ from, note })
+}
 // Keep every earlier reply whose id the newer report dropped.
 const mergeReplies = (previous, current) => [...current, ...previous.filter(p => !current.some(c => c.id === p.id))]
 
-// Developer -> reviewer loop for one developer role. Returns { dev, review, history }.
+// Developer -> reviewer loop for one developer role.
+// Returns { dev, review, history, ownDone, foreign, nextRole }.
 async function buildAndReview(devRole, devPrompt, scope, label, diffBase) {
   let dev = await agent(`${role(devRole)}\n${ctx()}\n${devPrompt}`, { label: `${devRole}:${label}`, phase: 'Implement', schema: DEV })
   if (!dev) throw new Error(`${devRole} failed`)
   const history = []
+  const nextNotes = []
+  const absorb = d => {
+    addDecisions(devRole, d.decisions)
+    addOrchestrator(devRole, d.orchestrator)
+    if (d.nextRole && !nextNotes.includes(d.nextRole)) nextNotes.push(d.nextRole)
+  }
+  absorb(dev)
   let review = null
+  let mine = []
   for (let round = 1; round <= MAX_REVIEW_ROUNDS; round++) {
-    review = await agent(`${role('code-reviewer')}\n${ctx()}\nReview the work of the ${devRole} on ${BRANCH}: ${diffBase}, plus anything uncommitted. Scope: ${scope}\nDeveloper report (round ${round}): ${JSON.stringify(dev)}\n${history.length ? 'Previous rounds: ' + JSON.stringify(history) : ''}`,
+    review = await agent(`${role('code-reviewer')}\n${ctx()}\nReview the work of the ${devRole} on ${BRANCH}: ${diffBase}, plus anything uncommitted. Scope: ${scope}\nName the owner role for every blocking issue (orchestrator for CLAUDE.md and .claude/**).\nDeveloper report (round ${round}): ${JSON.stringify(dev)}\n${history.length ? 'Previous rounds: ' + JSON.stringify(history) : ''}`,
       { label: `code-reviewer:${label}-${round}`, phase: 'Review', schema: REVIEW })
     if (!review) throw new Error('code-reviewer failed')
+    addDecisions('code-reviewer', review.decisions)
+    addDeferred(devRole, review)
+    mine = review.blocking.filter(b => b.owner === devRole)
     history.push({ round, approved: review.approved, blocking: review.blocking })
-    log(`${label} (${devRole}) review round ${round}: ${review.approved ? 'APPROVED' : review.blocking.length + ' blocking'}`)
-    if (review.approved || round === MAX_REVIEW_ROUNDS) break
+    log(`${label} (${devRole}) review round ${round}: ${review.approved ? 'APPROVED' : `${review.blocking.length} blocking (${mine.length} own)`}`)
+    // Stop when approved, when nothing left is this role's to fix, or when the budget is spent.
+    if (review.approved || !mine.length || round === MAX_REVIEW_ROUNDS) break
     const previous = dev
-    dev = await agent(`${role(devRole)}\n${ctx()}\nThe code-reviewer did not approve. Fix every blocking issue in your area, re-run all checks, commit locally (no push). For blocking issues owned by another role, explain in handoff exactly what that role must do. Return a reply for every finding id in the original assignment: carry over your previous replies and update them where this round changes them.\nORIGINAL ASSIGNMENT: ${devPrompt}\nPREVIOUS REPORT: ${JSON.stringify(previous)}\nREVIEW: ${JSON.stringify(review)}`,
+    dev = await agent(`${role(devRole)}\n${ctx()}\nThe code-reviewer did not approve. Fix every blocking issue owned by ${devRole}: ${JSON.stringify(mine)}. Issues owned by other roles are routed separately; do not touch them. Re-run all checks, commit locally (no push). Return a reply for every finding id in the original assignment: carry over your previous replies and update them where this round changes them.\nORIGINAL ASSIGNMENT: ${devPrompt}\nPREVIOUS REPORT: ${JSON.stringify(previous)}\nFULL REVIEW: ${JSON.stringify(review)}`,
       { label: `${devRole}:${label}-fix-${round}`, phase: 'Implement', schema: DEV })
     if (!dev) throw new Error(`${devRole} failed`)
     dev = { ...dev, replies: mergeReplies(previous.replies, dev.replies) }
+    absorb(dev)
   }
-  addDecisions(devRole, dev.decisions)
-  addDecisions('code-reviewer', review.decisions)
-  if (dev.handoff) result.handoffs.push({ from: devRole, note: dev.handoff })
-  return { dev, review, history }
+  const foreign = review.blocking.filter(b => b.owner !== devRole)
+  for (const b of foreign.filter(b => b.owner === 'orchestrator')) addOrchestrator('code-reviewer', `${b.file}: ${b.issue} — fix: ${b.fix}`)
+  return { dev, review, history, ownDone: review.approved || !mine.length, foreign, nextRole: nextNotes.join('\n') }
 }
 
-// Runs the ordered assignments, passing hand-off notes forward.
+// Runs the ordered assignments; blocking issues in another role's area become
+// extra packages for that role, inserted right after (capped). Hand-off notes accumulate.
 async function runAssignments(assignments, extraScope, labelPrefix, diffBase) {
+  const queue = [...assignments]
   const out = []
   let handoff = ''
-  for (const [i, a] of assignments.entries()) {
-    const scope = `${a.tasks}${extraScope ? '; additional in-scope work: ' + extraScope : ''}`
-    const built = await buildAndReview(a.role, `Implement: ${scope}\nBrief from the task-manager:\n${a.brief}${handoff ? '\nHand-off from the previous developer role:\n' + handoff : ''}`, scope, `${labelPrefix}-${i + 1}`, diffBase)
-    out.push({ role: a.role, tasks: a.tasks, approved: built.review.approved, rounds: built.history.length, review: built.review, dev: built.dev })
-    handoff = built.dev.handoff || ''
-    if (!built.review.approved) { log(`${a.role} work not approved; stopping before later assignments`); break }
+  let inserted = 0
+  for (let i = 0; i < queue.length; i++) {
+    const a = queue[i]
+    const scope = `${a.tasks}${extraScope && !a.inserted ? '; additional in-scope work: ' + extraScope : ''}`
+    const built = await buildAndReview(a.role, `Implement: ${scope}\nBrief from the task-manager:\n${a.brief}${handoff ? '\nHand-off notes from earlier developer roles:\n' + handoff : ''}`, scope, `${labelPrefix}-${i + 1}`, diffBase)
+    out.push({ role: a.role, tasks: a.tasks, inserted: !!a.inserted, approved: built.review.approved, ownDone: built.ownDone, rounds: built.history.length, review: built.review, dev: built.dev })
+    if (built.nextRole) handoff = [handoff, built.nextRole].filter(Boolean).join('\n')
+    if (!built.ownDone) { log(`${a.role} work not approved; stopping before later assignments`); break }
+    // Route blocking issues owned by another developer role to that role.
+    const byOwner = {}
+    for (const b of built.foreign.filter(b => DEV_ROLES.includes(b.owner))) (byOwner[b.owner] = byOwner[b.owner] || []).push(b)
+    let insertAt = i + 1
+    for (const owner of DEV_ROLES) {
+      if (!byOwner[owner]) continue
+      if (inserted >= MAX_INSERTED_PACKAGES) { log(`cap of ${MAX_INSERTED_PACKAGES} extra packages reached; ${byOwner[owner].length} issue(s) for ${owner} not routed`); continue }
+      queue.splice(insertAt++, 0, { role: owner, inserted: true, tasks: `Fix the blocking review findings in your area: ${JSON.stringify(byOwner[owner])}`, brief: `Raised by the code-reviewer while reviewing the ${a.role} work on: ${a.tasks}` })
+      inserted++
+    }
   }
-  return out
+  return { out, skipped: queue.slice(out.length).map(a => ({ role: a.role, tasks: a.tasks })) }
 }
 
 let pr = A.pr || null
+let deliveredDeferred = 0
 
 // Prepare: worktree, follow-ups, routing (skipped in review mode when root is given).
 phase('Prepare')
@@ -169,24 +217,35 @@ const what = MODE === 'implement'
   ? `task group ${A.group} (tasks ${A.tasks}) of openspec/changes/${CHANGE}/tasks.md`
   : MODE === 'issue' ? `GitHub issue #${A.issue} (read it with 'gh issue view ${A.issue} --comments')` : `the existing PR #${pr}`
 if (!WORK || MODE !== 'review') {
-  const prep = await agent(`${role('task-manager')}\n${mainCtx()}\nPrepare ${what}. ${MODE === 'review' ? `Reuse or add a worktree for the existing branch ${BRANCH} (tracking origin). Assignments may be empty.` : `Create a new worktree with branch ${BRANCH} from origin/main. Gather related follow-ups and route the work into ordered assignments for the developer roles (see "Route and brief" in your role).`}${A.devExtra ? `\nAdditional in-scope work from the orchestrator: ${A.devExtra}` : ''}\nSet prepared to true only when the worktree is ready on ${BRANCH}; otherwise false with the reason.`,
+  const how = MODE === 'review'
+    ? `Reuse or add a worktree for the existing branch ${BRANCH} (tracking origin). Assignments may be empty.`
+    : RESUME
+      ? `RESUME an interrupted run: reuse the existing branch ${BRANCH} and its worktree (add one tracking the branch if none exists; do NOT create a new branch). Read 'git log origin/main..HEAD', 'git status' and${MODE === 'implement' ? ' tasks.md' : ' the issue'} to see what is already done, and route only the remaining work, saying in each brief what the existing commits already did. Uncommitted changes from the interrupted developer: list them in the brief so the developer reviews them before continuing.`
+      : `Create a new worktree with branch ${BRANCH} from origin/main. Gather related follow-ups and route the work into ordered assignments for the developer roles (see "Route and brief" in your role).`
+  const prep = await agent(`${role('task-manager')}\n${mainCtx()}\nPrepare ${what}. ${how}${A.devExtra ? `\nAdditional in-scope work from the orchestrator: ${A.devExtra}` : ''}\nSet prepared to true only when the worktree is ready on ${BRANCH}; otherwise false with the reason.`,
     { label: 'task-manager:prepare', phase: 'Prepare', schema: PREPARE })
   if (!prep) throw new Error('task-manager failed to prepare')
   if (prep.prepared !== true) throw new Error('task-manager did not prepare the worktree: ' + prep.reason)
-  WORK = prep.worktree
+  const norm = p => String(p || '').replace(/\/+$/, '')
+  const w = norm(prep.worktree)
+  if (!w.startsWith('/')) throw new Error(`task-manager returned a non-absolute worktree path: "${prep.worktree}"`)
+  if (w === norm(MAIN || prep.mainCheckout)) throw new Error('the worktree is the main checkout; refusing to continue')
+  if (prep.branch !== BRANCH) throw new Error(`worktree ${w} is on ${prep.branch}, not ${BRANCH}; refusing to continue`)
+  WORK = w
   result.worktree = WORK
   result.relatedFollowUps = prep.relatedFollowUps
   log(`Worktree ${WORK}; ${prep.assignments.length} assignment(s): ${prep.assignments.map(a => a.role).join(' -> ') || 'none'}`)
 
   if (MODE !== 'review') {
     if (!prep.assignments.length) throw new Error('task-manager returned no assignments')
-    const built = await runAssignments(prep.assignments, A.devExtra, MODE, `'git log origin/main..HEAD' and 'git diff origin/main...HEAD'`)
-    result.implementation = built.map(b => ({ role: b.role, tasks: b.tasks, approved: b.approved, rounds: b.rounds }))
-    const allApproved = built.length === prep.assignments.length && built.every(b => b.approved)
+    const { out: built, skipped } = await runAssignments(prep.assignments, A.devExtra, MODE, `'git log origin/main..HEAD' and 'git diff origin/main...HEAD'`)
+    const last = built[built.length - 1]
+    const allApproved = !skipped.length && built.every(b => b.ownDone) && last.review.blocking.every(b => b.owner === 'orchestrator')
+    result.implementation = { allApproved, packages: built.map(b => ({ role: b.role, tasks: b.tasks, inserted: b.inserted, approved: b.approved, rounds: b.rounds })), skipped }
 
     phase('Deliver')
-    const deferred = built.flatMap(b => b.review.suggestions.filter(s => s.later).map(s => ({ from: b.role, ...s })))
-    const delivered = await agent(`${role('task-manager')}\n${ctx()}\nDeliver ${what}. All work approved: ${allApproved}. Per assignment: ${JSON.stringify(built.map(b => ({ role: b.role, tasks: b.tasks, approved: b.approved, rounds: b.rounds, review: b.review, dev: b.dev })))}.\nDecisions for the user so far: ${JSON.stringify(result.decisions)}\nDeferred suggestions to file as follow-up issues (label follow-up plus bug or enhancement): ${JSON.stringify(deferred)}${A.extra ? '\nExtra instructions: ' + A.extra : ''}\n${MODE === 'implement' ? 'Tick the completed, undisputed tasks in tasks.md and commit that. ' : `The PR body must say "Fixes #${A.issue}". `}File the follow-up issues, push ${BRANCH}, open the PR (draft if not all approved), with a "Decisions for you" section if there are decisions. Do not wait for CI or Copilot yet — the Copilot phase follows. After creating the PR, run 'gh pr view <number> --json headRefName,url' and report exactly what it returns. If anything failed, set created=false and explain in error; never guess a PR number.`,
+    deliveredDeferred = result.deferred.length
+    const delivered = await agent(`${role('task-manager')}\n${ctx()}\nDeliver ${what}. All work approved: ${allApproved}. Per package: ${JSON.stringify(built.map(b => ({ role: b.role, tasks: b.tasks, inserted: b.inserted, approved: b.approved, rounds: b.rounds, review: b.review, dev: b.dev })))}.${skipped.length ? `\nNot attempted (an earlier package was not approved): ${JSON.stringify(skipped)}. List these in the PR.` : ''}\nDecisions for the user: ${JSON.stringify(result.decisions)}\nDeferred suggestions to file as follow-up issues (label follow-up plus bug or enhancement): ${JSON.stringify(result.deferred)}\nChanges the orchestrator must apply to CLAUDE.md / .claude/** (mention them in the PR, do not apply them): ${JSON.stringify(result.orchestrator)}${A.extra ? '\nExtra instructions: ' + A.extra : ''}\n${MODE === 'implement' ? 'Tick the completed, undisputed tasks in tasks.md and commit that. ' : `The PR body must say "Fixes #${A.issue}". `}File the follow-up issues, push ${BRANCH}, open the PR (draft if not all approved), with a "Decisions for you" section if there are decisions. Do not wait for CI or Copilot yet — the Copilot phase follows. After creating the PR, run 'gh pr view <number> --json headRefName,url' and report exactly what it returns. If anything failed, set created=false and explain in error; never guess a PR number.`,
       { label: 'task-manager:deliver', phase: 'Deliver', schema: DELIVERY })
     if (!delivered || delivered.created !== true) throw new Error('task-manager did not create the PR: ' + (delivered ? delivered.error || 'no error given' : 'no result'))
     if (!Number.isInteger(delivered.pr) || delivered.pr <= 0) throw new Error('task-manager returned an invalid PR number: ' + JSON.stringify(delivered))
@@ -209,6 +268,8 @@ let lastCiPassed = true
 // True when commits were pushed after the last collection, so the last
 // observed CI and Copilot status describe an older head.
 let pushedSinceCollect = false
+// Approved fix commits that stayed local because a later owner's fix was not approved.
+let unpushedLocalCommits = false
 const collect = async label => {
   const fb = await agent(`${role('task-manager')}\n${ctx()}\nPR #${pr}. Make sure the worktree is on ${BRANCH} and up to date with origin. Wait (poll every ~30s, at most ~15 minutes) until (a) the required checks have finished (skipped counts as passing) and (b) the Copilot review of the current head SHA has been submitted (see "Copilot reviews" in your role). If a required job failed because of an infrastructure error, re-run it once and wait again (see "Infrastructure failures" in your role); never re-run code failures. Then return the CI result, the owner of any CI failure, and every Copilot finding that still needs handling: all UNRESOLVED review threads, plus review-body findings (e.g. "previously missed issues") that are not in this already-handled list: ${JSON.stringify(handled)}. Do not change anything else.`,
     { label, phase: 'Copilot', schema: FEEDBACK })
@@ -240,49 +301,59 @@ for (let round = 1; round <= MAX_COPILOT_ROUNDS; round++) {
     // CI red without Copilot findings: the owning developer fixes CI.
     const owner = DEV_ROLES.includes(fb.ciOwner) ? fb.ciOwner : 'platform-engineer'
     const ci = await buildAndReview(owner, `CI on PR #${pr} is failing: ${fb.ciSummary}. You may not use 'gh' — the summary above is what you get; reproduce locally, fix the cause test-first, commit locally.`, `fix the failing CI on PR #${pr}`, `ci-${round}`, fixBase)
-    entry.ciFix = { owner, approved: ci.review.approved }
-    if (!ci.review.approved) break
+    entry.ciFix = { owner, approved: ci.ownDone }
+    if (!ci.ownDone) break
     const pushed = await agent(`${role('task-manager')}\n${ctx()}\nPush the approved CI fix commits on ${BRANCH} for PR #${pr}. Request a new Copilot review. Do not merge.`, { label: `task-manager:push-ci-${round}`, phase: 'Copilot' })
     if (!pushed) throw new Error('task-manager failed to push the CI fix')
     pushedSinceCollect = true
     continue
   }
 
-  const triage = await agent(`${role('code-reviewer')}\n${ctx()}\nTriage the Copilot findings on PR #${pr} (see "Triaging Copilot review comments" in your role). Read the code at the referenced locations on ${BRANCH} before deciding. One decision per finding id; for fix, name the owner role.\nFINDINGS: ${JSON.stringify(fb.findings)}`,
+  const triage = await agent(`${role('code-reviewer')}\n${ctx()}\nTriage the Copilot findings on PR #${pr} (see "Triaging Copilot review comments" in your role). Read the code at the referenced locations on ${BRANCH} before deciding. One decision per finding id; for fix, name the owner role (orchestrator for CLAUDE.md and .claude/**, with the exact diff as expectedFix). Report design questions for the user in userDecisions.\nFINDINGS: ${JSON.stringify(fb.findings)}`,
     { label: `code-reviewer:triage-${round}`, phase: 'Copilot', schema: TRIAGE })
   if (!triage) throw new Error('code-reviewer failed to triage')
+  addDecisions('code-reviewer', triage.userDecisions)
   const fixes = triage.decisions.filter(d => d.decision === 'fix')
+  const orchestratorFixes = fixes.filter(f => f.owner === 'orchestrator')
+  const devFixes = fixes.filter(f => f.owner !== 'orchestrator')
+  for (const f of orchestratorFixes) addOrchestrator('copilot', `${f.id}: ${f.expectedFix || f.reason}`)
   entry.decisions = triage.decisions.map(d => ({ id: d.id, decision: d.decision, owner: d.owner, reason: d.reason }))
-  log(`Triage: ${fixes.length} fix, ${triage.decisions.filter(d => d.decision === 'follow-up').length} follow-up, ${triage.decisions.filter(d => d.decision === 'decline').length} decline`)
+  log(`Triage: ${fixes.length} fix (${orchestratorFixes.length} for the orchestrator), ${triage.decisions.filter(d => d.decision === 'follow-up').length} follow-up, ${triage.decisions.filter(d => d.decision === 'decline').length} decline`)
 
-  // Fixes per owning role, in the cross-stack order backend -> frontend -> platform.
+  // Developer fixes per owning role, in the cross-stack order backend -> frontend -> platform.
   let replies = []
   let fixesApproved = true
+  let anyApproved = false
   for (const owner of DEV_ROLES) {
-    const mine = fixes.filter(f => (DEV_ROLES.includes(f.owner) ? f.owner : 'platform-engineer') === owner)
+    const mine = devFixes.filter(f => (DEV_ROLES.includes(f.owner) ? f.owner : 'platform-engineer') === owner)
     if (!mine.length) continue
     const fixResult = await buildAndReview(owner, `Fix these Copilot findings on PR #${pr}, as triaged by the code-reviewer. Test-first: reproduce each with a failing test. Commit locally (no push). Give a PR-thread reply per finding id.\nFIXES: ${JSON.stringify(mine)}`,
       `the Copilot fixes listed for PR #${pr}: ${JSON.stringify(mine.map(f => ({ id: f.id, expectedFix: f.expectedFix })))}`, `copilot-${round}-${owner}`, fixBase)
     replies = replies.concat(fixResult.dev.replies)
-    if (!fixResult.review.approved) { fixesApproved = false; break }
+    if (!fixResult.ownDone) { fixesApproved = false; break }
+    anyApproved = true
   }
   entry.fixApproved = fixesApproved
   if (!fixesApproved) {
     entry.note = 'Copilot fixes not approved by the code-reviewer; nothing pushed'
+    if (anyApproved) unpushedLocalCommits = true
     break
   }
 
-  const applied = await agent(`${role('task-manager')}\n${ctx()}\nApply the code-reviewer's triage of the Copilot findings on PR #${pr} (see "Copilot reviews" in your role):\n${fixes.length ? `1. Push the approved fix commits on ${BRANCH}.\n` : ''}2. For each decision: fix -> reply with the developer's reply (naming the commit) and resolve; follow-up -> create the GitHub issue (label follow-up plus bug or enhancement), reply with its link and resolve; decline -> reply with the reason and resolve. Review-body findings (id starts with "body:") have no thread: cover them in one PR comment.\n${fixes.length ? `3. Request a new Copilot review: gh pr edit ${pr} --add-reviewer @copilot\n` : ''}No @mentions. Do not merge. Return one result per finding id: done is true only when its reply/comment (and issue, for follow-up) actually exists and its thread is resolved; otherwise done is false with the error in note.\nTRIAGE: ${JSON.stringify(triage.decisions)}\nDEVELOPER REPLIES: ${JSON.stringify(replies)}`,
+  // Orchestrator-owned fixes stay open (unresolved) until the main session applies them.
+  const applyDecisions = triage.decisions.filter(d => !(d.decision === 'fix' && d.owner === 'orchestrator'))
+  const applied = await agent(`${role('task-manager')}\n${ctx()}\nApply the code-reviewer's triage of the Copilot findings on PR #${pr} (see "Copilot reviews" in your role):\n${devFixes.length ? `1. Push the approved fix commits on ${BRANCH}.\n` : ''}2. For each decision: fix -> reply with the developer's reply (naming the commit) and resolve; follow-up -> create the GitHub issue (label follow-up plus bug or enhancement), reply with its link and resolve; decline -> reply with the reason and resolve. Review-body findings (id starts with "body:") have no thread: cover them in one PR comment.\n${devFixes.length ? `3. Request a new Copilot review: gh pr edit ${pr} --add-reviewer @copilot\n` : ''}${orchestratorFixes.length ? `Leave these findings untouched (the orchestrator applies their fix to CLAUDE.md / .claude/**): ${JSON.stringify(orchestratorFixes.map(f => f.id))}.\n` : ''}No @mentions. Do not merge. Return one result per finding id you handled: done is true only when its reply/comment (and issue, for follow-up) actually exists and its thread is resolved; otherwise done is false with the error in note.\nTRIAGE: ${JSON.stringify(applyDecisions)}\nDEVELOPER REPLIES: ${JSON.stringify(replies)}`,
     { label: `task-manager:apply-${round}`, phase: 'Copilot', schema: APPLY })
   if (!applied) throw new Error('task-manager failed to apply the triage')
   entry.applied = applied
-  if (fixes.length) pushedSinceCollect = true
+  if (devFixes.length) pushedSinceCollect = true
   // Only mark findings handled once their replies/issues actually exist; the
   // rest are collected again (threads stay unresolved) and reported at handover.
   const doneIds = new Set(applied.results.filter(r => r.done === true).map(r => r.id))
+  const orchIds = new Set(orchestratorFixes.map(f => f.id))
   const summarize = f => ({ id: f.id, path: f.path, line: f.line, gist: f.body.slice(0, 120) })
-  handled.push(...fb.findings.filter(f => doneIds.has(f.id)).map(summarize))
-  for (const f of fb.findings.filter(f => !doneIds.has(f.id))) {
+  handled.push(...fb.findings.filter(f => doneIds.has(f.id) || orchIds.has(f.id)).map(summarize))
+  for (const f of fb.findings.filter(f => !doneIds.has(f.id) && !orchIds.has(f.id))) {
     const r = applied.results.find(x => x.id === f.id)
     const item = { ...summarize(f), note: r ? r.note : 'no result reported by the task-manager' }
     const i = unapplied.findIndex(u => u.id === f.id)
@@ -291,12 +362,12 @@ for (let round = 1; round <= MAX_COPILOT_ROUNDS; round++) {
   }
   // A later round may complete a finding that failed earlier.
   for (let i = unapplied.length - 1; i >= 0; i--) if (doneIds.has(unapplied[i].id)) unapplied.splice(i, 1)
-  const failedHere = fb.findings.filter(f => !doneIds.has(f.id)).map(f => f.id)
+  const failedHere = fb.findings.filter(f => !doneIds.has(f.id) && !orchIds.has(f.id)).map(f => f.id)
   if (failedHere.length) entry.failed = unapplied.filter(u => failedHere.includes(u.id))
   // Nothing pushed and CI green: Copilot will not review again, so we are done.
   // With CI red, continue: the threads are resolved now, so the next round
   // collects no findings and takes the CI-repair branch.
-  if (!fixes.length && fb.ciPassed) break
+  if (!devFixes.length && fb.ciPassed) break
 }
 if (pushedSinceCollect) {
   // The round budget ran out right after a push: collect once more so the
@@ -321,8 +392,9 @@ if (!lastCiPassed) {
   last.note = `${last.note ? last.note + '; ' : ''}Copilot loop ended with CI still failing in the last observed run`
   result.ciStillFailing = true
 }
+const deferredAfterDelivery = result.deferred.slice(deliveredDeferred)
 
-const report = await agent(`${role('task-manager')}\n${ctx()}\nFinal hand-over for PR #${pr} (see "Hand over" in your role): confirm there are no unresolved review threads and report the required checks ('gh pr checks ${pr} --required'; note skipped ones). Leave the worktree ${WORK} in place. Return a concise message to the user. Start with "Decisions for you" if there are any: ${JSON.stringify(result.decisions)}. Then: PR URL, CI results, what happened with the Copilot findings (fixed / follow-up issues with links / declined), follow-up issues filed at delivery (${JSON.stringify(result.followUpIssues || [])}), hand-off notes that need the orchestrator (e.g. diffs for CLAUDE.md or .claude/**): ${JSON.stringify(result.handoffs)}, infrastructure re-runs (${JSON.stringify(result.infraReruns || [])}), and the worktree path. Ask them to review. Do not merge.${result.copilotTimedOut ? `\nIMPORTANT: the Copilot review was NOT received within the wait window (timeout). Tell the user the Copilot review is still outstanding and must be checked before merging.` : ''}${result.ciStillFailing ? `\nIMPORTANT: the Copilot loop ended while the last observed CI run was failing. Tell the user CI is red and needs attention.` : ''}${result.outstandingFindings ? `\nIMPORTANT: the Copilot round budget is exhausted and these findings on the final head were NOT handled: ${JSON.stringify(result.outstandingFindings)}. List them as outstanding for the user.` : ''}${result.unappliedFindings ? `\nIMPORTANT: the reply, comment or issue for these Copilot findings could NOT be applied: ${JSON.stringify(result.unappliedFindings)}. List them as outstanding for the user.` : ''}\nCopilot rounds: ${JSON.stringify(result.copilotRounds)}`,
+const report = await agent(`${role('task-manager')}\n${ctx()}\nFinal hand-over for PR #${pr} (see "Hand over" in your role): confirm there are no unresolved review threads apart from orchestrator-owned ones, and report the required checks ('gh pr checks ${pr} --required'; note skipped ones). Leave the worktree ${WORK} in place.${deferredAfterDelivery.length ? `\nFile these deferred suggestions (raised after delivery) as follow-up issues and list the links: ${JSON.stringify(deferredAfterDelivery)}.` : ''}\nReturn a concise message to the user. Start with "Decisions for you" if there are any: ${JSON.stringify(result.decisions)}. Then: PR URL, CI results, the implementation packages (approved, rounds, inserted, skipped): ${JSON.stringify(result.implementation || null)}, what happened with the Copilot findings (fixed / follow-up issues with links / declined), follow-up issues filed at delivery (${JSON.stringify(result.followUpIssues || [])}), related follow-ups found at prepare (${JSON.stringify(result.relatedFollowUps || [])}), changes the orchestrator must apply to CLAUDE.md / .claude/** (${JSON.stringify(result.orchestrator)}), infrastructure re-runs (${JSON.stringify(result.infraReruns || [])}), and the worktree path. Ask them to review. Do not merge.${unpushedLocalCommits ? `\nIMPORTANT: some approved Copilot-fix commits are only local in ${WORK} because a later owner's fix was not approved. Say so.` : ''}${result.copilotTimedOut ? `\nIMPORTANT: the Copilot review was NOT received within the wait window (timeout). Tell the user the Copilot review is still outstanding and must be checked before merging.` : ''}${result.ciStillFailing ? `\nIMPORTANT: the Copilot loop ended while the last observed CI run was failing. Tell the user CI is red and needs attention.` : ''}${result.outstandingFindings ? `\nIMPORTANT: the Copilot round budget is exhausted and these findings on the final head were NOT handled: ${JSON.stringify(result.outstandingFindings)}. List them as outstanding for the user.` : ''}${result.unappliedFindings ? `\nIMPORTANT: the reply, comment or issue for these Copilot findings could NOT be applied: ${JSON.stringify(result.unappliedFindings)}. List them as outstanding for the user.` : ''}\nCopilot rounds: ${JSON.stringify(result.copilotRounds)}`,
   { label: 'task-manager:handover', phase: 'Copilot' })
 result.handover = report
 return result

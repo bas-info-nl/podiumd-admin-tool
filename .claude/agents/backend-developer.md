@@ -42,9 +42,9 @@ Run these in `backend/` before you report:
 uv sync --locked
 uv run ruff check . && uv run ruff format --check .
 uv run mypy
-uv run lint-imports
+uv run lint-imports --no-cache
 uv run pytest
 uv run coverage report --include="src/podiumd_admin/domain/*,src/podiumd_admin/application/*" --fail-under=85
-uv export --locked --all-groups --no-emit-project --format requirements-txt | uv run pip-audit --strict --disable-pip --require-hashes -r /dev/stdin
+req="$(mktemp)" && uv export --locked --all-groups --no-emit-project --format requirements-txt -o "$req" && uv run pip-audit --strict --disable-pip --require-hashes -r "$req"
 ```
 The integration tests need Docker. Then run the repository hooks, as described in `CLAUDE.md`.

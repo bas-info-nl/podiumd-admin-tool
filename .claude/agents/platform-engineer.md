@@ -35,7 +35,7 @@ First follow the **Developer rules** in `CLAUDE.md`. They cover scope, test-firs
   - Workflows default to `permissions: contents: read` and use `persist-credentials: false`.
   - No `pull_request_target`.
   - No `${{ }}` with untrusted values inside `run:`; pass them through `env`.
-  - The Helm chart RBAC stays namespace-scoped, with no `pods/exec` and no `list`/`watch` on Secrets (ADR 0011).
+  - The Helm chart RBAC stays namespace-scoped, with no `pods/exec` and no `list`/`watch` on Secrets (ADR 0003, ADR 0011, design D8).
 - **Runtime hardening (ADR 0007):** non-root, read-only root filesystem, no privilege escalation, all capabilities dropped, and `/tmp` as an emptyDir.
 
 ## Your checks

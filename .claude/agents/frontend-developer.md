@@ -42,4 +42,6 @@ npm ci
 npm run lint && npm run format:check && npm run typecheck && npm run test:coverage
 npm audit
 ```
-In `e2e/`: `npm ci`, the typecheck, and the tests once there are features. Use the Node version from `.nvmrc`; run `nvm use` first. Then run the repository hooks, as described in `CLAUDE.md`.
+In `e2e/`: `npm ci`, `npm run typecheck`, `npm audit`, and the tests once there are features.
+
+Use the Node version from `.nvmrc`. Check that `node --version` matches it. If it doesn't, start each command in the same shell call with `. "$NVM_DIR/nvm.sh" && nvm use &&`, because shell state doesn't carry over between calls. Then run the repository hooks, as described in `CLAUDE.md`.
