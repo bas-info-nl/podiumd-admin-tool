@@ -73,6 +73,7 @@ const PREPARE = { type: 'object', properties: {
   prepared: { type: 'boolean', description: 'true only when the worktree exists on the feature branch, created from (or, in review/resume mode, tracking) origin' },
   worktree: { type: 'string', description: 'absolute path of the worktree' },
   branch: { type: 'string', description: "output of 'git -C <worktree> branch --show-current'" },
+  linkedWorktree: { type: 'boolean', description: "true only when <worktree> is a linked worktree, not the main checkout: [ \"$(git -C <worktree> rev-parse --absolute-git-dir)\" != \"$(cd <worktree> && cd \"$(git rev-parse --git-common-dir)\" && pwd -P)\" ]" },
   mainCheckout: { type: 'string', description: "output of 'git rev-parse --show-toplevel' in the main checkout" },
   assignments: { type: 'array', description: 'ordered work packages; cross-stack: backend first, then frontend, then platform', items: { type: 'object', properties: {
     role: { type: 'string', enum: DEV_ROLES },
@@ -81,7 +82,7 @@ const PREPARE = { type: 'object', properties: {
   }, required: ['role', 'tasks', 'brief'] } },
   relatedFollowUps: { type: 'array', items: { type: 'string' } },
   reason: { type: 'string', description: 'why not prepared (empty when prepared)' },
-}, required: ['prepared', 'worktree', 'branch', 'mainCheckout', 'assignments', 'relatedFollowUps', 'reason'] }
+}, required: ['prepared', 'worktree', 'branch', 'linkedWorktree', 'mainCheckout', 'assignments', 'relatedFollowUps', 'reason'] }
 const DELIVERY = { type: 'object', properties: {
   created: { type: 'boolean', description: 'true only if gh pr create succeeded (or an open PR for this exact branch already exists)' },
   pr: { type: 'integer', description: 'the PR number; 0 when created is false' },
@@ -94,6 +95,7 @@ const FEEDBACK = { type: 'object', properties: {
   pr: { type: 'integer' },
   headRefName: { type: 'string', description: "from 'gh pr view <pr> --json headRefName'" },
   localBranch: { type: 'string', description: "output of 'git -C <worktree> branch --show-current'" },
+  linkedWorktree: { type: 'boolean', description: "true only when <worktree> is a linked worktree, not the main checkout: [ \"$(git -C <worktree> rev-parse --absolute-git-dir)\" != \"$(cd <worktree> && cd \"$(git rev-parse --git-common-dir)\" && pwd -P)\" ]" },
   headSha: { type: 'string' },
   ciPassed: { type: 'boolean', description: 'all required checks passed or were skipped' },
   ciSummary: { type: 'string' },
@@ -105,7 +107,7 @@ const FEEDBACK = { type: 'object', properties: {
     kind: { type: 'string', enum: ['thread', 'body'] },
     path: { type: 'string' }, line: { type: 'integer' }, body: { type: 'string' },
   }, required: ['id', 'kind', 'path', 'body'] } },
-}, required: ['pr', 'headRefName', 'localBranch', 'headSha', 'ciPassed', 'ciSummary', 'ciOwner', 'infraReruns', 'copilotReviewed', 'findings'] }
+}, required: ['pr', 'headRefName', 'localBranch', 'linkedWorktree', 'headSha', 'ciPassed', 'ciSummary', 'ciOwner', 'infraReruns', 'copilotReviewed', 'findings'] }
 const TRIAGE = { type: 'object', properties: {
   decisions: { type: 'array', items: { type: 'object', properties: {
     id: { type: 'string' },
@@ -214,6 +216,35 @@ async function runAssignments(assignments, extraScope, labelPrefix, diffBase) {
   return { out, skipped: queue.slice(out.length).map(a => ({ role: a.role, tasks: a.tasks })) }
 }
 
+const fixBase = `'git log origin/${BRANCH}..HEAD' and 'git diff origin/${BRANCH}...HEAD'`
+// Runs fix packages until every developer-owned blocking issue is cleared.
+// Blocking issues in another developer's area become extra packages (sharing the
+// run-wide cap). ok is true only when all packages are done and nothing
+// developer-owned is left; only then may the fixes be pushed.
+let insertedFixPackages = 0
+async function fixUntilClear(packages, label) {
+  const queue = [...packages]
+  let replies = []
+  let anyDone = false
+  const leftover = []
+  for (let i = 0; i < queue.length; i++) {
+    const p = queue[i]
+    const r = await buildAndReview(p.owner, p.prompt, p.scope, `${label}-${i + 1}-${p.owner}`, fixBase)
+    replies = replies.concat(r.dev.replies)
+    if (!r.ownDone) return { ok: false, replies, anyDone, leftover }
+    anyDone = true
+    const byOwner = {}
+    for (const b of r.foreign.filter(b => DEV_ROLES.includes(b.owner))) (byOwner[b.owner] = byOwner[b.owner] || []).push(b)
+    for (const owner of DEV_ROLES) {
+      if (!byOwner[owner]) continue
+      if (insertedFixPackages >= MAX_INSERTED_PACKAGES) { leftover.push(...byOwner[owner]); continue }
+      insertedFixPackages++
+      queue.push({ owner, prompt: `Fix these blocking review findings in your area, raised while reviewing the ${p.owner} fix on PR #${pr}: ${JSON.stringify(byOwner[owner])}. Test-first, commit locally (no push).`, scope: `blocking findings for ${owner}: ${JSON.stringify(byOwner[owner])}` })
+    }
+  }
+  return { ok: !leftover.length, replies, anyDone, leftover }
+}
+
 let pr = A.pr || null
 let deliveredDeferred = 0
 
@@ -237,6 +268,7 @@ if (!WORK || MODE !== 'review') {
   if (!w.startsWith('/')) throw new Error(`task-manager returned a non-absolute worktree path: "${prep.worktree}"`)
   if (!MAIN && !norm(prep.mainCheckout).startsWith('/')) throw new Error(`task-manager did not report the main checkout path: "${prep.mainCheckout}"`)
   if (w === norm(MAIN || prep.mainCheckout)) throw new Error('the worktree is the main checkout; refusing to continue')
+  if (prep.linkedWorktree !== true) throw new Error(`${w} is not a linked git worktree (it may be the main checkout); refusing to continue`)
   if (prep.branch !== BRANCH) throw new Error(`worktree ${w} is on ${prep.branch}, not ${BRANCH}; refusing to continue`)
   WORK = w
   result.worktree = WORK
@@ -291,13 +323,14 @@ let lastCiPassed = true
 // True when commits were pushed after the last collection, so the last
 // observed CI and Copilot status describe an older head.
 let pushedSinceCollect = false
-// Approved fix commits that stayed local because a later owner's fix was not approved.
+// Approved fix commits that stayed local because a later fix package was not cleared.
 let unpushedLocalCommits = false
 const collect = async label => {
   const fb = await agent(`${role('task-manager')}\n${ctx()}\nPR #${pr}. Make sure the worktree is on ${BRANCH} and up to date with origin. Wait (poll every ~30s, at most ~15 minutes) until (a) the required checks have finished (skipped counts as passing) and (b) the Copilot review of the current head SHA has been submitted (see "Copilot reviews" in your role). If a required job failed because of an infrastructure error, re-run it once and wait again (see "Infrastructure failures" in your role); never re-run code failures. Then return the CI result, the owner of any CI failure, and every Copilot finding that still needs handling: all UNRESOLVED review threads, plus review-body findings (e.g. "previously missed issues") that are not in this already-handled list: ${JSON.stringify(handled)}. Do not change anything else.`,
     { label, phase: 'Copilot', schema: FEEDBACK })
   if (!fb) throw new Error('task-manager failed to collect feedback')
   if (fb.pr !== pr || fb.headRefName !== BRANCH) throw new Error(`PR #${fb.pr} is for branch ${fb.headRefName}, expected #${pr} on ${BRANCH}; refusing to touch it`)
+  if (fb.linkedWorktree !== true) throw new Error(`${WORK} is not a linked git worktree (it may be the main checkout); refusing to continue`)
   if (fb.localBranch !== BRANCH) throw new Error(`worktree ${WORK} is on ${fb.localBranch}, not ${BRANCH}; refusing to continue`)
   pushedSinceCollect = false
   lastCiPassed = fb.ciPassed
@@ -308,7 +341,6 @@ const collect = async label => {
   return fb
 }
 const orchestratorIds = new Set()
-const fixBase = `'git log origin/${BRANCH}..HEAD' and 'git diff origin/${BRANCH}...HEAD'`
 for (let round = 1; round <= MAX_COPILOT_ROUNDS; round++) {
   const fb = await collect(`task-manager:collect-${round}`)
   // Orchestrator-owned threads stay open on purpose until the main session applies their diff: ignore them here.
@@ -327,10 +359,14 @@ for (let round = 1; round <= MAX_COPILOT_ROUNDS; round++) {
   if (!findings.length && !fb.ciPassed) {
     // CI red without Copilot findings: the owning developer fixes CI.
     const owner = DEV_ROLES.includes(fb.ciOwner) ? fb.ciOwner : 'platform-engineer'
-    const ci = await buildAndReview(owner, `CI on PR #${pr} is failing: ${fb.ciSummary}. You may not use 'gh' — the summary above is what you get; reproduce locally, fix the cause test-first, commit locally.`, `fix the failing CI on PR #${pr}`, `ci-${round}`, fixBase)
-    entry.ciFix = { owner, approved: ci.ownDone }
-    addUnrouted(`ci-${round}`, ci.foreign.filter(b => DEV_ROLES.includes(b.owner)))
-    if (!ci.ownDone) break
+    const ci = await fixUntilClear([{ owner, prompt: `CI on PR #${pr} is failing: ${fb.ciSummary}. You may not use 'gh' — the summary above is what you get; reproduce locally, fix the cause test-first, commit locally.`, scope: `fix the failing CI on PR #${pr}` }], `ci-${round}`)
+    entry.ciFix = { owner, approved: ci.ok }
+    addUnrouted(`ci-${round}`, ci.leftover)
+    if (!ci.ok) {
+      entry.note = 'CI fix not cleared by the code-reviewer (or blocking issues left for another role); nothing pushed'
+      if (ci.anyDone) unpushedLocalCommits = true
+      break
+    }
     const pushed = await agent(`${role('task-manager')}\n${ctx()}\nPush the approved CI fix commits on ${BRANCH} for PR #${pr}. Request a new Copilot review. Do not merge.`, { label: `task-manager:push-ci-${round}`, phase: 'Copilot' })
     if (!pushed) throw new Error('task-manager failed to push the CI fix')
     pushedSinceCollect = true
@@ -348,24 +384,18 @@ for (let round = 1; round <= MAX_COPILOT_ROUNDS; round++) {
   entry.decisions = triage.decisions.map(d => ({ id: d.id, decision: d.decision, owner: d.owner, reason: d.reason }))
   log(`Triage: ${fixes.length} fix (${orchestratorFixes.length} for the orchestrator), ${triage.decisions.filter(d => d.decision === 'follow-up').length} follow-up, ${triage.decisions.filter(d => d.decision === 'decline').length} decline`)
 
-  // Developer fixes per owning role, in the cross-stack order backend -> frontend -> platform.
-  let replies = []
-  let fixesApproved = true
-  let anyApproved = false
-  for (const owner of DEV_ROLES) {
-    const mine = devFixes.filter(f => (DEV_ROLES.includes(f.owner) ? f.owner : 'platform-engineer') === owner)
-    if (!mine.length) continue
-    const fixResult = await buildAndReview(owner, `Fix these Copilot findings on PR #${pr}, as triaged by the code-reviewer. Test-first: reproduce each with a failing test. Commit locally (no push). Give a PR-thread reply per finding id.\nFIXES: ${JSON.stringify(mine)}`,
-      `the Copilot fixes listed for PR #${pr}: ${JSON.stringify(mine.map(f => ({ id: f.id, expectedFix: f.expectedFix })))}`, `copilot-${round}-${owner}`, fixBase)
-    replies = replies.concat(fixResult.dev.replies)
-    addUnrouted(`copilot-${round}-${owner}`, fixResult.foreign.filter(b => DEV_ROLES.includes(b.owner)))
-    if (!fixResult.ownDone) { fixesApproved = false; break }
-    anyApproved = true
-  }
-  entry.fixApproved = fixesApproved
-  if (!fixesApproved) {
-    entry.note = 'Copilot fixes not approved by the code-reviewer; nothing pushed'
-    if (anyApproved) unpushedLocalCommits = true
+  // Developer fixes per owning role (backend -> frontend -> platform), plus any blocking
+  // issues they raise for other roles; nothing is pushed unless all are cleared.
+  const packages = DEV_ROLES.map(owner => ({ owner, mine: devFixes.filter(f => (DEV_ROLES.includes(f.owner) ? f.owner : 'platform-engineer') === owner) }))
+    .filter(p => p.mine.length)
+    .map(p => ({ owner: p.owner, prompt: `Fix these Copilot findings on PR #${pr}, as triaged by the code-reviewer. Test-first: reproduce each with a failing test. Commit locally (no push). Give a PR-thread reply per finding id.\nFIXES: ${JSON.stringify(p.mine)}`, scope: `the Copilot fixes listed for PR #${pr}: ${JSON.stringify(p.mine.map(f => ({ id: f.id, expectedFix: f.expectedFix })))}` }))
+  const fixRun = packages.length ? await fixUntilClear(packages, `copilot-${round}`) : { ok: true, replies: [], anyDone: false, leftover: [] }
+  const replies = fixRun.replies
+  addUnrouted(`copilot-${round}`, fixRun.leftover)
+  entry.fixApproved = fixRun.ok
+  if (!fixRun.ok) {
+    entry.note = 'Copilot fixes not cleared by the code-reviewer (or blocking issues left for another role); nothing pushed'
+    if (fixRun.anyDone) unpushedLocalCommits = true
     break
   }
 
@@ -425,7 +455,7 @@ if (!lastCiPassed) {
 }
 const deferredAfterDelivery = result.deferred.slice(deliveredDeferred)
 
-const report = await agent(`${role('task-manager')}\n${ctx()}\nFinal hand-over for PR #${pr} (see "Hand over" in your role): confirm there are no unresolved review threads apart from orchestrator-owned ones, and report the required checks ('gh pr checks ${pr} --required'; note skipped ones). Leave the worktree ${WORK} in place.${deferredAfterDelivery.length ? `\nFile these deferred suggestions (raised after delivery) as follow-up issues and list the links: ${JSON.stringify(deferredAfterDelivery)}.` : ''}\nReturn a concise message to the user. Start with "Decisions for you" if there are any: ${JSON.stringify(result.decisions)}. Then: PR URL, CI results, the implementation packages (approved, rounds, inserted, skipped): ${JSON.stringify(result.implementation || null)}, what happened with the Copilot findings (fixed / follow-up issues with links / declined), follow-up issues filed at delivery (${JSON.stringify(result.followUpIssues || [])}), related follow-ups found at prepare (${JSON.stringify(result.relatedFollowUps || [])}), changes the orchestrator must apply to CLAUDE.md / .claude/** (${JSON.stringify(result.orchestrator)}), infrastructure re-runs (${JSON.stringify(result.infraReruns || [])}), and the worktree path. Ask them to review. Do not merge.${result.unrouted.length ? '\nIMPORTANT: these blocking review issues in another role\'s area were NOT fixed in this run; list them as outstanding and file a follow-up issue for each: ' + JSON.stringify(result.unrouted) : ''}${unpushedLocalCommits ? `\nIMPORTANT: some approved Copilot-fix commits are only local in ${WORK} because a later owner's fix was not approved. Say so.` : ''}${result.copilotTimedOut ? `\nIMPORTANT: the Copilot review was NOT received within the wait window (timeout). Tell the user the Copilot review is still outstanding and must be checked before merging.` : ''}${result.ciStillFailing ? `\nIMPORTANT: the Copilot loop ended while the last observed CI run was failing. Tell the user CI is red and needs attention.` : ''}${result.outstandingFindings ? `\nIMPORTANT: the Copilot round budget is exhausted and these findings on the final head were NOT handled: ${JSON.stringify(result.outstandingFindings)}. List them as outstanding for the user.` : ''}${result.unappliedFindings ? `\nIMPORTANT: the reply, comment or issue for these Copilot findings could NOT be applied: ${JSON.stringify(result.unappliedFindings)}. List them as outstanding for the user.` : ''}\nCopilot rounds: ${JSON.stringify(result.copilotRounds)}`,
+const report = await agent(`${role('task-manager')}\n${ctx()}\nFinal hand-over for PR #${pr} (see "Hand over" in your role): confirm there are no unresolved review threads apart from orchestrator-owned ones, and report the required checks ('gh pr checks ${pr} --required'; note skipped ones). Leave the worktree ${WORK} in place.${deferredAfterDelivery.length ? `\nFile these deferred suggestions (raised after delivery) as follow-up issues and list the links: ${JSON.stringify(deferredAfterDelivery)}.` : ''}\nReturn a concise message to the user. Start with "Decisions for you" if there are any: ${JSON.stringify(result.decisions)}. Then: PR URL, CI results, the implementation packages (approved, rounds, inserted, skipped): ${JSON.stringify(result.implementation || null)}, what happened with the Copilot findings (fixed / follow-up issues with links / declined), follow-up issues filed at delivery (${JSON.stringify(result.followUpIssues || [])}), related follow-ups found at prepare (${JSON.stringify(result.relatedFollowUps || [])}), changes the orchestrator must apply to CLAUDE.md / .claude/** (${JSON.stringify(result.orchestrator)}), infrastructure re-runs (${JSON.stringify(result.infraReruns || [])}), and the worktree path. Ask them to review. Do not merge.${result.unrouted.length ? '\nIMPORTANT: these blocking review issues in another role\'s area were NOT fixed in this run; list them as outstanding and file a follow-up issue for each: ' + JSON.stringify(result.unrouted) : ''}${unpushedLocalCommits ? `\nIMPORTANT: some approved fix commits are only local in ${WORK} because a later fix package was not cleared. Say so.` : ''}${result.copilotTimedOut ? `\nIMPORTANT: the Copilot review was NOT received within the wait window (timeout). Tell the user the Copilot review is still outstanding and must be checked before merging.` : ''}${result.ciStillFailing ? `\nIMPORTANT: the Copilot loop ended while the last observed CI run was failing. Tell the user CI is red and needs attention.` : ''}${result.outstandingFindings ? `\nIMPORTANT: the Copilot round budget is exhausted and these findings on the final head were NOT handled: ${JSON.stringify(result.outstandingFindings)}. List them as outstanding for the user.` : ''}${result.unappliedFindings ? `\nIMPORTANT: the reply, comment or issue for these Copilot findings could NOT be applied: ${JSON.stringify(result.unappliedFindings)}. List them as outstanding for the user.` : ''}\nCopilot rounds: ${JSON.stringify(result.copilotRounds)}`,
   { label: 'task-manager:handover', phase: 'Copilot' })
 result.handover = report
 return result

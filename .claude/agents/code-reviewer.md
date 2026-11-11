@@ -14,7 +14,14 @@ You are the **code reviewer** of the PodiumD Admin Tool team: task-manager, back
    - the e2e gates in `e2e/`: `npm ci && npm run typecheck && npm audit`;
    - `uv run --project backend --locked pre-commit run --all-files --show-diff-on-failure`. Its fixer hooks rewrite files, so run it in your scratch worktree. Prepare that worktree first:
      1. create it;
-     2. copy in the developer's uncommitted changes with `git -C <worktree> diff HEAD | git -C <scratch> apply`;
+     2. copy in the developer's uncommitted work, both tracked changes and new files, and stage it **in the scratch worktree only**:
+        ```
+        d="$(mktemp)"; git -C <worktree> diff --binary HEAD > "$d"
+        if [ -s "$d" ]; then git -C <scratch> apply --index "$d"; fi
+        git -C <worktree> ls-files --others --exclude-standard -z | rsync -a --from0 --files-from=- <worktree>/ <scratch>/
+        git -C <scratch> add -A
+        ```
+        An empty diff is normal for a clean worktree; skip the apply rather than reporting a failure;
      3. install the tools the hooks need with `(cd <scratch>/backend && uv sync --locked) && (cd <scratch>/frontend && npm ci)`. The prettier and eslint hooks run from `frontend/node_modules`.
 
      If the hooks change anything, report the diff as a blocking issue; never keep or commit the change.
