@@ -45,6 +45,6 @@ uv run mypy
 uv run lint-imports --no-cache
 uv run pytest
 uv run coverage report --include="src/podiumd_admin/domain/*,src/podiumd_admin/application/*" --fail-under=85
-req="$(mktemp)" && uv export --locked --all-groups --no-emit-project --format requirements-txt -o "$req" && uv run pip-audit --strict --disable-pip --require-hashes -r "$req"
+req="$(mktemp)" && uv export --quiet --locked --all-groups --no-emit-project --format requirements-txt -o "$req" && uv run pip-audit --strict --disable-pip --require-hashes -r "$req"
 ```
 The integration tests need Docker. Then run the repository hooks, as described in `CLAUDE.md`.
