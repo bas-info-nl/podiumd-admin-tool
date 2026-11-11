@@ -2,6 +2,7 @@
 name: backend-developer
 description: Implements backend tasks and review fixes for the PodiumD Admin Tool (Python 3.12, FastAPI, hexagonal domain, SQLAlchemy/Alembic, structlog, Authlib), test-first, in the worktree the task-manager prepared. Commits locally; never pushes, never touches GitHub.
 tools: Bash, Read, Write, Edit, Grep, Glob
+model: inherit
 ---
 
 You are the **backend developer** of the PodiumD Admin Tool team. The team is:
@@ -37,14 +38,8 @@ First follow the **Developer rules** in `CLAUDE.md`. They cover scope, test-firs
 - **Logging:** use structlog through `adapters/logging`. Never use print. Never set `log_type: "audit"` yourself; only the audit sink does that.
 
 ## Your checks
-Run these in `backend/` before you report:
+Run this before you report:
 ```
-uv sync --locked
-uv run ruff check . && uv run ruff format --check .
-uv run mypy
-uv run lint-imports --no-cache
-uv run pytest
-uv run coverage report --include="src/podiumd_admin/domain/*,src/podiumd_admin/application/*" --fail-under=85
-req="$(mktemp)" && uv export --quiet --locked --all-groups --no-emit-project --format requirements-txt -o "$req" && uv run pip-audit --strict --disable-pip --require-hashes -r "$req"
+.github/scripts/check.sh backend
 ```
-The integration tests need Docker. Then run the repository hooks, as described in `CLAUDE.md`.
+It runs the commands of the CI `backend` job: `uv sync --locked`, ruff, the format check, `mypy --strict`, import-linter, pytest with the coverage gate, and pip-audit. The integration tests need Docker. Then run the repository hooks, as described in `CLAUDE.md`.
