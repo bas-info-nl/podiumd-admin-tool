@@ -131,7 +131,7 @@ const APPLY = { type: 'object', properties: {
   summary: { type: 'string' },
 }, required: ['results', 'summary'] }
 
-const result = { mode: MODE, branch: BRANCH, resume: RESUME, decisions: [], deferred: [], orchestrator: [], unrouted: [] }
+const result = { mode: MODE, branch: BRANCH, resume: RESUME, decisions: [], deferred: [], orchestrator: [], unrouted: [], handoffNotes: [] }
 const keyOf = s => String(s || '').trim().toLowerCase()
 const addDecisions = (from, list) => {
   for (const d of list || []) if (!result.decisions.some(x => keyOf(x.question) === keyOf(d.question))) result.decisions.push({ from, ...d })
@@ -142,6 +142,11 @@ const addDeferred = (from, review) => {
 const addOrchestrator = (from, note) => {
   if (note && !result.orchestrator.some(x => keyOf(x.note) === keyOf(note))) result.orchestrator.push({ from, note })
 }
+// Hand-off notes between developer roles (e.g. a backend API change for the frontend), kept for the whole run.
+const addHandoff = note => { if (note && !result.handoffNotes.some(x => keyOf(x) === keyOf(note))) result.handoffNotes.push(note) }
+const handoffText = () => result.handoffNotes.length ? `\nHand-off notes from developer roles in this run:\n${result.handoffNotes.join('\n')}` : ''
+// One budget of extra (inserted) packages for the whole run, shared by the implement and repair queues.
+let insertedPackages = 0
 // Blocking issues in another developer's area that this run did not fix.
 const addUnrouted = (from, list) => { for (const b of list || []) result.unrouted.push({ from, ...b }) }
 // Keep every earlier reply whose id the newer report dropped.
@@ -158,6 +163,7 @@ async function buildAndReview(devRole, devPrompt, scope, label, diffBase) {
     addDecisions(devRole, d.decisions)
     addOrchestrator(devRole, d.orchestrator)
     if (d.nextRole && !nextNotes.includes(d.nextRole)) nextNotes.push(d.nextRole)
+    addHandoff(d.nextRole)
   }
   absorb(dev)
   let review = null
@@ -193,14 +199,11 @@ async function buildAndReview(devRole, devPrompt, scope, label, diffBase) {
 async function runAssignments(assignments, extraScope, labelPrefix, diffBase) {
   const queue = [...assignments]
   const out = []
-  let handoff = ''
-  let inserted = 0
   for (let i = 0; i < queue.length; i++) {
     const a = queue[i]
     const scope = `${a.tasks}${extraScope && !a.inserted ? '; additional in-scope work: ' + extraScope : ''}`
-    const built = await buildAndReview(a.role, `Implement: ${scope}\nBrief from the task-manager:\n${a.brief}${handoff ? '\nHand-off notes from earlier developer roles:\n' + handoff : ''}`, scope, `${labelPrefix}-${i + 1}`, diffBase)
+    const built = await buildAndReview(a.role, `Implement: ${scope}\nBrief from the task-manager:\n${a.brief}${handoffText()}`, scope, `${labelPrefix}-${i + 1}`, diffBase)
     out.push({ role: a.role, tasks: a.tasks, inserted: !!a.inserted, approved: built.review.approved, ownDone: built.ownDone, rounds: built.history.length, review: built.review, dev: built.dev })
-    if (built.nextRole) handoff = [handoff, built.nextRole].filter(Boolean).join('\n')
     if (!built.ownDone) { log(`${a.role} work not approved; stopping before later assignments`); break }
     // Route blocking issues owned by another developer role to that role.
     const byOwner = {}
@@ -208,9 +211,9 @@ async function runAssignments(assignments, extraScope, labelPrefix, diffBase) {
     let insertAt = i + 1
     for (const owner of DEV_ROLES) {
       if (!byOwner[owner]) continue
-      if (inserted >= MAX_INSERTED_PACKAGES) { addUnrouted(`${a.role} review`, byOwner[owner]); log(`cap of ${MAX_INSERTED_PACKAGES} extra packages reached; ${byOwner[owner].length} issue(s) for ${owner} not routed`); continue }
+      if (insertedPackages >= MAX_INSERTED_PACKAGES) { addUnrouted(`${a.role} review`, byOwner[owner]); log(`cap of ${MAX_INSERTED_PACKAGES} extra packages reached; ${byOwner[owner].length} issue(s) for ${owner} not routed`); continue }
       queue.splice(insertAt++, 0, { role: owner, inserted: true, tasks: `Fix the blocking review findings in your area: ${JSON.stringify(byOwner[owner])}`, brief: `Raised by the code-reviewer while reviewing the ${a.role} work on: ${a.tasks}` })
-      inserted++
+      insertedPackages++
     }
   }
   return { out, skipped: queue.slice(out.length).map(a => ({ role: a.role, tasks: a.tasks })) }
@@ -221,27 +224,34 @@ const fixBase = `'git log origin/${BRANCH}..HEAD' and 'git diff origin/${BRANCH}
 // Blocking issues in another developer's area become extra packages (sharing the
 // run-wide cap). ok is true only when all packages are done and nothing
 // developer-owned is left; only then may the fixes be pushed.
-let insertedFixPackages = 0
 async function fixUntilClear(packages, label) {
   const queue = [...packages]
   let replies = []
   let anyDone = false
-  const leftover = []
+  // Blockers that could not be queued (cap reached), with the queue position they were raised at.
+  const overCap = []
   for (let i = 0; i < queue.length; i++) {
     const p = queue[i]
-    const r = await buildAndReview(p.owner, p.prompt, p.scope, `${label}-${i + 1}-${p.owner}`, fixBase)
+    const r = await buildAndReview(p.owner, `${p.prompt}${handoffText()}`, p.scope, `${label}-${i + 1}-${p.owner}`, fixBase)
     replies = replies.concat(r.dev.replies)
-    if (!r.ownDone) return { ok: false, replies, anyDone, leftover }
+    if (!r.ownDone) {
+      // Out of review rounds: everything still blocking (this role's and other developers') is outstanding.
+      const open = r.review.blocking.filter(b => DEV_ROLES.includes(b.owner))
+      return { ok: false, replies, anyDone, leftover: [...open, ...overCap.map(o => o.item).filter(x => !open.includes(x))] }
+    }
     anyDone = true
     const byOwner = {}
     for (const b of r.foreign.filter(b => DEV_ROLES.includes(b.owner))) (byOwner[b.owner] = byOwner[b.owner] || []).push(b)
     for (const owner of DEV_ROLES) {
       if (!byOwner[owner]) continue
-      if (insertedFixPackages >= MAX_INSERTED_PACKAGES) { leftover.push(...byOwner[owner]); continue }
-      insertedFixPackages++
+      if (insertedPackages >= MAX_INSERTED_PACKAGES) { for (const item of byOwner[owner]) overCap.push({ item, at: i }); continue }
+      insertedPackages++
       queue.push({ owner, prompt: `Fix these blocking review findings in your area, raised while reviewing the ${p.owner} fix on PR #${pr}: ${JSON.stringify(byOwner[owner])}. Test-first, commit locally (no push).`, scope: `blocking findings for ${owner}: ${JSON.stringify(byOwner[owner])}` })
     }
   }
+  // Recompute: an over-cap blocker is still open only if no package of its owner completed after it was raised
+  // (each package's review covers the whole branch, so a later approved package of that owner cleared it).
+  const leftover = overCap.filter(o => !queue.some((q, j) => j > o.at && q.owner === o.item.owner)).map(o => o.item)
   return { ok: !leftover.length, replies, anyDone, leftover }
 }
 
@@ -300,7 +310,7 @@ if (!WORK || MODE !== 'review') {
 
     phase('Deliver')
     deliveredDeferred = result.deferred.length
-    const delivered = await agent(`${role('task-manager')}\n${ctx()}\nDeliver ${what}. All work approved: ${allApproved}. Per package: ${JSON.stringify(built.map(b => ({ role: b.role, tasks: b.tasks, inserted: b.inserted, approved: b.approved, rounds: b.rounds, review: b.review, dev: b.dev })))}.${skipped.length ? `\nNot attempted (an earlier package was not approved): ${JSON.stringify(skipped)}. List these in the PR.` : ''}\nDecisions for the user: ${JSON.stringify(result.decisions)}\nDeferred suggestions to file as follow-up issues (label follow-up plus bug or enhancement): ${JSON.stringify(result.deferred)}\nChanges the orchestrator must apply to CLAUDE.md / .claude/** (mention them in the PR, do not apply them): ${JSON.stringify(result.orchestrator)}${A.extra ? '\nExtra instructions: ' + A.extra : ''}\n${MODE === 'implement' ? 'Tick the completed, undisputed tasks in tasks.md and commit that. ' : `The PR body must say "Fixes #${A.issue}". `}File the follow-up issues, push ${BRANCH}, open the PR (draft if not all approved), with a "Decisions for you" section if there are decisions. Do not wait for CI or Copilot yet — the Copilot phase follows. After creating the PR, run 'gh pr view <number> --json headRefName,url' and report exactly what it returns. If anything failed, set created=false and explain in error; never guess a PR number.`,
+    const delivered = await agent(`${role('task-manager')}\n${ctx()}\nDeliver ${what}. All work approved: ${allApproved}. Per package: ${JSON.stringify(built.map(b => ({ role: b.role, tasks: b.tasks, inserted: b.inserted, approved: b.approved, rounds: b.rounds, review: b.review, dev: b.dev })))}.${skipped.length ? `\nNot attempted (an earlier package was not approved): ${JSON.stringify(skipped)}. List these in the PR.` : ''}\nDecisions for the user: ${JSON.stringify(result.decisions)}\nDeferred suggestions to file as follow-up issues (label follow-up plus bug or enhancement): ${JSON.stringify(result.deferred)}\nHand-off notes between developer roles (mention API changes in the PR): ${JSON.stringify(result.handoffNotes)}\nChanges the orchestrator must apply to CLAUDE.md / .claude/** (mention them in the PR, do not apply them): ${JSON.stringify(result.orchestrator)}${A.extra ? '\nExtra instructions: ' + A.extra : ''}\n${MODE === 'implement' ? 'Tick the completed, undisputed tasks in tasks.md and commit that. ' : `The PR body must say "Fixes #${A.issue}". `}File the follow-up issues, push ${BRANCH}, open the PR (draft if not all approved), with a "Decisions for you" section if there are decisions. Do not wait for CI or Copilot yet — the Copilot phase follows. After creating the PR, run 'gh pr view <number> --json headRefName,url' and report exactly what it returns. If anything failed, set created=false and explain in error; never guess a PR number.`,
       { label: 'task-manager:deliver', phase: 'Deliver', schema: DELIVERY })
     if (!delivered || delivered.created !== true) throw new Error('task-manager did not create the PR: ' + (delivered ? delivered.error || 'no error given' : 'no result'))
     if (!Number.isInteger(delivered.pr) || delivered.pr <= 0) throw new Error('task-manager returned an invalid PR number: ' + JSON.stringify(delivered))
@@ -455,7 +465,7 @@ if (!lastCiPassed) {
 }
 const deferredAfterDelivery = result.deferred.slice(deliveredDeferred)
 
-const report = await agent(`${role('task-manager')}\n${ctx()}\nFinal hand-over for PR #${pr} (see "Hand over" in your role): confirm there are no unresolved review threads apart from orchestrator-owned ones, and report the required checks ('gh pr checks ${pr} --required'; note skipped ones). Leave the worktree ${WORK} in place.${deferredAfterDelivery.length ? `\nFile these deferred suggestions (raised after delivery) as follow-up issues and list the links: ${JSON.stringify(deferredAfterDelivery)}.` : ''}\nReturn a concise message to the user. Start with "Decisions for you" if there are any: ${JSON.stringify(result.decisions)}. Then: PR URL, CI results, the implementation packages (approved, rounds, inserted, skipped): ${JSON.stringify(result.implementation || null)}, what happened with the Copilot findings (fixed / follow-up issues with links / declined), follow-up issues filed at delivery (${JSON.stringify(result.followUpIssues || [])}), related follow-ups found at prepare (${JSON.stringify(result.relatedFollowUps || [])}), changes the orchestrator must apply to CLAUDE.md / .claude/** (${JSON.stringify(result.orchestrator)}), infrastructure re-runs (${JSON.stringify(result.infraReruns || [])}), and the worktree path. Ask them to review. Do not merge.${result.unrouted.length ? '\nIMPORTANT: these blocking review issues in another role\'s area were NOT fixed in this run; list them as outstanding and file a follow-up issue for each: ' + JSON.stringify(result.unrouted) : ''}${unpushedLocalCommits ? `\nIMPORTANT: some approved fix commits are only local in ${WORK} because a later fix package was not cleared. Say so.` : ''}${result.copilotTimedOut ? `\nIMPORTANT: the Copilot review was NOT received within the wait window (timeout). Tell the user the Copilot review is still outstanding and must be checked before merging.` : ''}${result.ciStillFailing ? `\nIMPORTANT: the Copilot loop ended while the last observed CI run was failing. Tell the user CI is red and needs attention.` : ''}${result.outstandingFindings ? `\nIMPORTANT: the Copilot round budget is exhausted and these findings on the final head were NOT handled: ${JSON.stringify(result.outstandingFindings)}. List them as outstanding for the user.` : ''}${result.unappliedFindings ? `\nIMPORTANT: the reply, comment or issue for these Copilot findings could NOT be applied: ${JSON.stringify(result.unappliedFindings)}. List them as outstanding for the user.` : ''}\nCopilot rounds: ${JSON.stringify(result.copilotRounds)}`,
+const report = await agent(`${role('task-manager')}\n${ctx()}\nFinal hand-over for PR #${pr} (see "Hand over" in your role): confirm there are no unresolved review threads apart from orchestrator-owned ones, and report the required checks ('gh pr checks ${pr} --required'; note skipped ones). Leave the worktree ${WORK} in place.${deferredAfterDelivery.length ? `\nFile these deferred suggestions (raised after delivery) as follow-up issues and list the links: ${JSON.stringify(deferredAfterDelivery)}.` : ''}\nReturn a concise message to the user. Start with "Decisions for you" if there are any: ${JSON.stringify(result.decisions)}. Then: PR URL, CI results, the implementation packages (approved, rounds, inserted, skipped): ${JSON.stringify(result.implementation || null)}, what happened with the Copilot findings (fixed / follow-up issues with links / declined), follow-up issues filed at delivery (${JSON.stringify(result.followUpIssues || [])}), related follow-ups found at prepare (${JSON.stringify(result.relatedFollowUps || [])}), hand-off notes between developer roles (${JSON.stringify(result.handoffNotes)}), changes the orchestrator must apply to CLAUDE.md / .claude/** (${JSON.stringify(result.orchestrator)}), infrastructure re-runs (${JSON.stringify(result.infraReruns || [])}), and the worktree path. Ask them to review. Do not merge.${result.unrouted.length ? '\nIMPORTANT: these blocking review issues in another role\'s area were NOT fixed in this run; list them as outstanding and file a follow-up issue for each: ' + JSON.stringify(result.unrouted) : ''}${unpushedLocalCommits ? `\nIMPORTANT: some approved fix commits are only local in ${WORK} because a later fix package was not cleared. Say so.` : ''}${result.copilotTimedOut ? `\nIMPORTANT: the Copilot review was NOT received within the wait window (timeout). Tell the user the Copilot review is still outstanding and must be checked before merging.` : ''}${result.ciStillFailing ? `\nIMPORTANT: the Copilot loop ended while the last observed CI run was failing. Tell the user CI is red and needs attention.` : ''}${result.outstandingFindings ? `\nIMPORTANT: the Copilot round budget is exhausted and these findings on the final head were NOT handled: ${JSON.stringify(result.outstandingFindings)}. List them as outstanding for the user.` : ''}${result.unappliedFindings ? `\nIMPORTANT: the reply, comment or issue for these Copilot findings could NOT be applied: ${JSON.stringify(result.unappliedFindings)}. List them as outstanding for the user.` : ''}\nCopilot rounds: ${JSON.stringify(result.copilotRounds)}`,
   { label: 'task-manager:handover', phase: 'Copilot' })
 result.handover = report
 return result
