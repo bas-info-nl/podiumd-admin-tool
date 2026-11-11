@@ -236,8 +236,11 @@ async function fixUntilClear(packages, label) {
     replies = replies.concat(r.dev.replies)
     if (!r.ownDone) {
       // Out of review rounds: everything still blocking (this role's and other developers') is outstanding.
+      // Also report blockers queued for packages that will now never run.
       const open = r.review.blocking.filter(b => DEV_ROLES.includes(b.owner))
-      return { ok: false, replies, anyDone, leftover: [...open, ...overCap.map(o => o.item).filter(x => !open.includes(x))] }
+      const unrun = queue.slice(i + 1).flatMap(q => q.blockers || [])
+      const all = [...open, ...unrun, ...overCap.map(o => o.item)]
+      return { ok: false, replies, anyDone, leftover: all.filter((x, k) => all.indexOf(x) === k) }
     }
     anyDone = true
     const byOwner = {}
@@ -246,7 +249,7 @@ async function fixUntilClear(packages, label) {
       if (!byOwner[owner]) continue
       if (insertedPackages >= MAX_INSERTED_PACKAGES) { for (const item of byOwner[owner]) overCap.push({ item, at: i }); continue }
       insertedPackages++
-      queue.push({ owner, prompt: `Fix these blocking review findings in your area, raised while reviewing the ${p.owner} fix on PR #${pr}: ${JSON.stringify(byOwner[owner])}. Test-first, commit locally (no push).`, scope: `blocking findings for ${owner}: ${JSON.stringify(byOwner[owner])}` })
+      queue.push({ owner, blockers: byOwner[owner], prompt: `Fix these blocking review findings in your area, raised while reviewing the ${p.owner} fix on PR #${pr}: ${JSON.stringify(byOwner[owner])}. Test-first, commit locally (no push).`, scope: `blocking findings for ${owner}: ${JSON.stringify(byOwner[owner])}` })
     }
   }
   // Recompute: an over-cap blocker is still open only if no package of its owner completed after it was raised
