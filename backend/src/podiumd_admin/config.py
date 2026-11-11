@@ -40,6 +40,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 
+from podiumd_admin.domain.client_ip import IPNetwork
 from podiumd_admin.domain.environment import (
     EnvironmentIdentity,
     IdentityField,
@@ -106,8 +107,6 @@ _MAX_HOSTNAME_LENGTH: Final = 253
 _DATABASE_DRIVER: Final = "postgresql+psycopg"
 _PLAIN_DATABASE_DRIVER: Final = "postgresql"
 
-type ProxyNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
-
 
 @dataclass(frozen=True, slots=True)
 class ConfigurationProblem:
@@ -142,7 +141,7 @@ class Settings:
     database_app_url: SecretStr
     session_encryption_keys: tuple[SecretStr, ...]
     session_timeouts: SessionTimeouts
-    trusted_proxies: tuple[ProxyNetwork, ...]
+    trusted_proxies: tuple[IPNetwork, ...]
 
 
 class _Source(BaseSettings):
@@ -488,9 +487,9 @@ def _session_timeouts(problems: _Problems, source: _Source) -> SessionTimeouts |
         return None
 
 
-def _proxies(value: str) -> tuple[ProxyNetwork, ...]:
+def _proxies(value: str) -> tuple[IPNetwork, ...]:
     """Comma-separated addresses or CIDR ranges; blank trusts no proxy."""
-    networks: list[ProxyNetwork] = []
+    networks: list[IPNetwork] = []
     for entry in (entry.strip() for entry in value.split(",")):
         if not entry:
             continue
