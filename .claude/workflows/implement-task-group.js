@@ -255,7 +255,10 @@ if (!WORK || MODE !== 'review') {
       if (!review) throw new Error('code-reviewer failed')
       addDecisions('code-reviewer', review.decisions)
       addDeferred('resume', review)
-      built = [{ role: 'resume', tasks: 'already implemented before the interruption', inserted: false, approved: review.approved, ownDone: review.approved, rounds: 1, review, dev: null }]
+      for (const x of review.blocking.filter(x => x.owner === 'orchestrator')) addOrchestrator('code-reviewer', `${x.file}: ${x.issue} — fix: ${x.fix}`)
+      addUnrouted('resume-check', review.blocking.filter(x => DEV_ROLES.includes(x.owner)))
+      const resumeOk = review.approved || (review.blocking.length > 0 && review.blocking.every(x => x.owner === 'orchestrator'))
+      built = [{ role: 'resume', tasks: 'already implemented before the interruption', inserted: false, approved: review.approved, ownDone: resumeOk, rounds: 1, review, dev: null }]
       skipped = []
     }
     const last = built[built.length - 1]
