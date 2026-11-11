@@ -13,10 +13,12 @@ If any statement fails, PostgreSQL aborts the whole transaction, so none of
 its entries can be committed, even when the caller swallows the error (as
 ``AuditRecorder.record_denial`` does for a failed insert). The commit then
 raises nothing but rolls back. So before the commit the hook reads the
-transaction status from the driver, and writes nothing for an aborted
-transaction. The transaction belongs to ``audited_transaction``: a caller that
-ends it inside the block (``connection.rollback()`` or ``connection.commit()``)
-gets a ``RuntimeError`` and nothing is written, because after an explicit
+transaction status from the driver; for an aborted transaction it writes
+nothing and raises ``TransactionAbortedError`` (issue #30), so the caller
+never reports an action as done that was rolled back. The transaction belongs
+to ``audited_transaction``: a caller that ends it inside the block
+(``connection.rollback()`` or ``connection.commit()``) also gets a
+``TransactionAbortedError`` and nothing is written, because after an explicit
 rollback the driver reports an idle connection, not an aborted transaction.
 Savepoints are not supported: an entry inserted under a
 savepoint that is later rolled back would still be written.
@@ -34,6 +36,15 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 from podiumd_admin.adapters.db.audit import SqlAuditRepository
 from podiumd_admin.domain.audit import AuditEntry
 from podiumd_admin.ports.audit import AuditRepository, AuditSink
+
+
+class TransactionAbortedError(RuntimeError):
+    """The transaction of ``audited_transaction`` did not commit, although its block ended normally.
+
+    Nothing the block did, including its Audit Entries, was stored, and no
+    stdout copy was written. A caller shows the user the same error as for
+    ``AuditWriteFailedError``: the action could not be recorded.
+    """
 
 
 @dataclass
@@ -73,7 +84,9 @@ async def audited_transaction(
     """Run a transaction; write its Audit Entries to ``sink`` once it has committed.
 
     The transaction commits when the block ends normally and rolls back when
-    it raises. A failing stdout copy does not raise: the entry and the action
+    it raises. Raises ``TransactionAbortedError`` if the block ended normally
+    but the transaction could not commit, because a swallowed failure aborted
+    it or the block ended it itself. A failing stdout copy does not raise: the entry and the action
     it records have been committed, and reporting a failure would be false.
     The other entries are still written.
     """
@@ -81,13 +94,16 @@ async def audited_transaction(
         repository = _RememberingAuditRepository(SqlAuditRepository(connection))
         yield AuditedTransaction(connection=connection, audit_repository=repository)
         if not connection.in_transaction():
-            raise RuntimeError(
+            raise TransactionAbortedError(
                 "audited_transaction owns the transaction; do not end it inside the block"
             )
         # The commit of an aborted transaction raises nothing but rolls back.
         aborted = await _is_aborted(connection)
     if aborted:
-        return
+        raise TransactionAbortedError(
+            "a failed statement aborted the transaction, so it was rolled back and "
+            "nothing was stored"
+        )
     for entry in repository.inserted:
         with contextlib.suppress(Exception):
             sink.entry_stored(entry)

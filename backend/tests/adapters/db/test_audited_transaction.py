@@ -18,7 +18,7 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from podiumd_admin.adapters.db.audit import SqlAuditRepository
-from podiumd_admin.adapters.db.unit_of_work import audited_transaction
+from podiumd_admin.adapters.db.unit_of_work import TransactionAbortedError, audited_transaction
 from podiumd_admin.adapters.logging import StdoutAuditSink
 from podiumd_admin.application.audit import AuditRecorder
 from podiumd_admin.domain.audit import AuditEntry, Outcome, ReasonCode
@@ -178,45 +178,53 @@ async def test_a_failing_stdout_copy_does_not_undo_the_commit_or_stop_the_others
     assert await _stored(app_engine, second)
 
 
-async def test_no_entry_is_written_when_a_swallowed_insert_failure_aborted_the_transaction(
+async def test_a_swallowed_insert_failure_raises_at_the_commit_and_writes_nothing(
     app_engine: AsyncEngine,
 ) -> None:
-    # record_denial never raises, so the block can end normally although the
-    # failed insert aborted the transaction and nothing was stored.
+    # record_denial never raises, so the block ends normally although the
+    # failed insert aborted the transaction and nothing was stored (issue #30).
     sink = FakeAuditSink()
     first = _entry()
     denial = _entry(outcome=Outcome.DENIED, reason=ReasonCode.MISSING_PERMISSION)
 
-    async with audited_transaction(app_engine, sink) as transaction:
-        recorder = AuditRecorder(repository=transaction.audit_repository, sink=sink)
-        await transaction.audit_repository.add(first)
-        await transaction.audit_repository.add(denial)
-        await recorder.record_denial(denial)  # the same id again: refused
+    async def deny_twice() -> None:
+        async with audited_transaction(app_engine, sink) as transaction:
+            recorder = AuditRecorder(repository=transaction.audit_repository, sink=sink)
+            await transaction.audit_repository.add(first)
+            await transaction.audit_repository.add(denial)
+            await recorder.record_denial(denial)  # the same id again: refused
+
+    with pytest.raises(TransactionAbortedError):
+        await deny_twice()
 
     assert sink.stored == []
     assert [failed for failed, _ in sink.write_failures] == [denial]
     assert not await _stored(app_engine, first)
 
 
-async def test_no_entry_is_written_when_a_swallowed_action_failure_aborted_the_transaction(
+async def test_a_swallowed_action_failure_raises_at_the_commit_and_writes_nothing(
     app_engine: AsyncEngine,
 ) -> None:
     # Any failing statement aborts a PostgreSQL transaction. When the caller
-    # swallows the error, the commit raises nothing but rolls back, so the
-    # entry inserted before it was never stored.
+    # swallows the error, the commit would roll back silently, so the action
+    # and its entry were never stored. The caller must learn that (issue #30).
     sink = FakeAuditSink()
     entry = _entry()
 
-    async with audited_transaction(app_engine, sink) as transaction:
-        await transaction.audit_repository.add(entry)
-        with pytest.raises(DBAPIError):
-            await transaction.connection.execute(text("SELECT 1/0"))
+    async def swallow_failure() -> None:
+        async with audited_transaction(app_engine, sink) as transaction:
+            await transaction.audit_repository.add(entry)
+            with pytest.raises(DBAPIError):
+                await transaction.connection.execute(text("SELECT 1/0"))
+
+    with pytest.raises(TransactionAbortedError, match="rolled back"):
+        await swallow_failure()
 
     assert sink.stored == []
     assert not await _stored(app_engine, entry)
 
 
-async def test_ending_the_owned_transaction_inside_the_block_is_refused_and_writes_nothing(
+async def test_ending_the_owned_transaction_inside_the_block_raises_and_writes_nothing(
     app_engine: AsyncEngine,
 ) -> None:
     # After an explicit rollback the driver reports IDLE, not INERROR, so the
@@ -229,7 +237,7 @@ async def test_ending_the_owned_transaction_inside_the_block_is_refused_and_writ
             await transaction.audit_repository.add(entry)
             await transaction.connection.rollback()
 
-    with pytest.raises(RuntimeError, match="owns the transaction"):
+    with pytest.raises(TransactionAbortedError, match="owns the transaction"):
         await roll_back_inside()
 
     assert sink.stored == []
