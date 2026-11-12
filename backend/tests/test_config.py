@@ -227,6 +227,9 @@ def test_rejects_a_public_hostname_that_is_not_a_bare_hostname(
         "https://keycloak.example/realms/podiumd#x",
         "https://user:pw@keycloak.example/realms/podiumd",
         "https://keycloak.example:99999/realms/podiumd",
+        # Not a loopback address: a naive port strip would read it as ::1.
+        "http://[::1:abcd]:8080/realms/podiumd",
+        "http://[2001:db8::1]:8080/realms/podiumd",
     ],
 )
 def test_the_issuer_must_be_an_https_url(environ: pytest.MonkeyPatch, value: str) -> None:
@@ -240,7 +243,14 @@ def test_the_issuer_must_be_an_https_url(environ: pytest.MonkeyPatch, value: str
 
 
 @pytest.mark.parametrize(
-    "value", ["http://localhost:8080/realms/podiumd", "http://keycloak.localhost/realms/podiumd"]
+    "value",
+    [
+        "http://localhost:8080/realms/podiumd",
+        "http://keycloak.localhost/realms/podiumd",
+        "http://127.0.0.1:8080/realms/podiumd",
+        "http://[::1]:8080/realms/podiumd",
+        "http://[::1]/realms/podiumd",
+    ],
 )
 def test_a_local_development_issuer_may_use_http(environ: pytest.MonkeyPatch, value: str) -> None:
     environ.setenv("PODIUMD_ADMIN_OIDC_ISSUER", value)
@@ -428,7 +438,10 @@ def test_the_development_key_is_recognised_in_standard_base64(
         load_settings()
 
 
-@pytest.mark.parametrize("hostname", ["localhost:8443", "podiumd-admin.localhost", "127.0.0.1"])
+@pytest.mark.parametrize(
+    "hostname",
+    ["localhost:8443", "localhost:8080", "podiumd-admin.localhost", "127.0.0.1", "127.0.0.1:8080"],
+)
 def test_the_development_key_is_accepted_for_a_local_hostname(
     environ: pytest.MonkeyPatch, hostname: str
 ) -> None:
@@ -452,6 +465,9 @@ def test_the_development_key_is_accepted_for_a_local_hostname(
         ("PODIUMD_ADMIN_SESSION_IDLE_TIMEOUT_MINUTES", "-5", "must be positive"),
         ("PODIUMD_ADMIN_SESSION_IDLE_TIMEOUT_MINUTES", "481", "at most the absolute lifetime"),
         ("PODIUMD_ADMIN_SESSION_IDLE_TIMEOUT_MINUTES", "thirty", "integer"),
+        # Too large for a timedelta: OverflowError, not ValueError.
+        ("PODIUMD_ADMIN_SESSION_IDLE_TIMEOUT_MINUTES", "10000000000000", "too large"),
+        ("PODIUMD_ADMIN_SESSION_MAX_LIFETIME_MINUTES", "10000000000000", "too large"),
     ],
 )
 def test_invalid_timeouts_name_their_setting(
@@ -465,6 +481,21 @@ def test_invalid_timeouts_name_their_setting(
     problems = _problems(error)
     assert list(problems) == [name]
     assert fragment in problems[name]
+
+
+def test_a_too_large_timeout_is_collected_with_the_other_problems(
+    environ: pytest.MonkeyPatch,
+) -> None:
+    environ.setenv("PODIUMD_ADMIN_SESSION_MAX_LIFETIME_MINUTES", "10000000000000")
+    environ.setenv("PODIUMD_ADMIN_TRUSTED_PROXIES", "not-a-network")
+
+    with pytest.raises(ConfigurationError) as error:
+        load_settings()
+
+    assert sorted(_problems(error)) == [
+        "PODIUMD_ADMIN_SESSION_MAX_LIFETIME_MINUTES",
+        "PODIUMD_ADMIN_TRUSTED_PROXIES",
+    ]
 
 
 # --- Trusted proxies --------------------------------------------------------

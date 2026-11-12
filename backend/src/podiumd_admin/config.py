@@ -309,17 +309,25 @@ def _public_hostname(value: str) -> str:
     return hostname
 
 
-def _is_local(hostname: str | None) -> bool:
-    """Whether a hostname is a loopback name, used only for local development."""
-    if hostname is None:
-        return False
-    host = hostname.rsplit(":", 1)[0]
+def _is_loopback_host(host: str) -> bool:
+    """Whether a bare host (no port, no brackets) is a loopback name or address.
+
+    Used only to allow local development settings.
+    """
     if host == "localhost" or host.endswith(".localhost"):
         return True
     try:
         return ipaddress.ip_address(host).is_loopback
     except ValueError:
         return False
+
+
+def _is_local_public_hostname(public_hostname: str | None) -> bool:
+    """Whether a validated public hostname (an optional port, never an IPv6 literal) is local."""
+    if public_hostname is None:
+        return False
+    match = _HOSTNAME.fullmatch(public_hostname)
+    return match is not None and _is_loopback_host(match["host"])
 
 
 def _issuer(value: str) -> str:
@@ -332,7 +340,8 @@ def _issuer(value: str) -> str:
         _ = parts.port  # raises ValueError for an invalid port
     except ValueError:
         raise ValueError(problem) from None
-    local = parts.scheme == "http" and _is_local(hostname)
+    # ``urlsplit`` already removed the port and the IPv6 brackets.
+    local = parts.scheme == "http" and hostname is not None and _is_loopback_host(hostname)
     if (
         (parts.scheme != "https" and not local)
         or not hostname
@@ -441,7 +450,7 @@ def _encryption_keys(
     if not keys:
         problems.add(SESSION_ENCRYPTION_KEYS, _REQUIRED)
         return None
-    local = _is_local(public_hostname)
+    local = _is_local_public_hostname(public_hostname)
     found: list[str] = []
     for position, key in enumerate(keys, start=1):
         key_bytes = _key_bytes(key)
@@ -462,9 +471,14 @@ def _encryption_keys(
 
 def _minutes(value: str) -> timedelta:
     try:
-        return timedelta(minutes=int(value.strip()))
+        minutes = int(value.strip())
     except ValueError:
         raise ValueError("must be an integer number of minutes") from None
+    try:
+        return timedelta(minutes=minutes)
+    except OverflowError:
+        # Reported as a ValueError, so ``_checked`` names the setting.
+        raise ValueError("is too large for a number of minutes") from None
 
 
 def _session_timeouts(problems: _Problems, source: _Source) -> SessionTimeouts | None:
