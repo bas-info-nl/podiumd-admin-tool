@@ -36,7 +36,7 @@ from podiumd_admin.domain.audit import (
 )
 from podiumd_admin.domain.environment import EnvironmentIdentity, Stage
 
-ENVIRONMENT = EnvironmentIdentity(municipality="Utrecht", stage=Stage.TEST)
+ENVIRONMENT = EnvironmentIdentity(municipality="Onsdorp", stage=Stage.TEST)
 OCCURRED_AT = datetime(2026, 11, 8, 9, 30, tzinfo=UTC)
 
 
@@ -198,7 +198,7 @@ def test_required_text_fields_must_be_given(field: str, value: str | None) -> No
 
 def test_environment_must_be_an_environment_identity() -> None:
     with pytest.raises(InvalidAuditEntryError, match="environment"):
-        _entry(environment="utrecht-test")
+        _entry(environment="onsdorp-test")
 
 
 def test_outcome_must_be_an_outcome() -> None:

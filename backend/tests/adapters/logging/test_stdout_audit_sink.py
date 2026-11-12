@@ -34,7 +34,7 @@ from podiumd_admin.domain.environment import EnvironmentIdentity, Stage
 from podiumd_admin.ports.audit import AuditSink
 
 OCCURRED_AT = datetime(2026, 11, 8, 14, 30, 15, 123456, tzinfo=UTC)
-ENVIRONMENT = EnvironmentIdentity(municipality="Utrecht", stage=Stage.ACCP, label="Hosting B.V.")
+ENVIRONMENT = EnvironmentIdentity(municipality="Onsdorp", stage=Stage.ACCP, label="Hosting B.V.")
 
 
 def _entry(**overrides: Any) -> AuditEntry:
@@ -108,7 +108,7 @@ def test_a_stored_entry_is_one_json_line_with_every_field(
             "event": "audit_entry_stored",
             "id": str(entry.id),
             "occurred_at": "2026-11-08T14:30:15.123456+00:00",
-            "environment_municipality": "Utrecht",
+            "environment_municipality": "Onsdorp",
             "environment_stage": "accp",
             "environment_label": "Hosting B.V.",
             "action": "script-run:start",
@@ -129,7 +129,7 @@ def test_optional_fields_of_a_stored_entry_are_null(
 ) -> None:
     entry = AuditEntry(
         occurred_at=OCCURRED_AT,
-        environment=EnvironmentIdentity(municipality="Utrecht", stage=Stage.PROD),
+        environment=EnvironmentIdentity(municipality="Onsdorp", stage=Stage.PROD),
         action="sign-in",
         outcome=Outcome.ALLOWED,
         correlation_id="corr-2",
@@ -257,11 +257,11 @@ def test_the_overflow_line_has_no_client_ip(sink: StdoutAuditSink, stream: io.St
 def test_ordinary_structlog_lines_are_json_without_the_audit_marker(stream: io.StringIO) -> None:
     configure_logging(stream=stream)
 
-    structlog.get_logger("podiumd_admin.test").info("environment_loaded", municipality="Utrecht")
+    structlog.get_logger("podiumd_admin.test").info("environment_loaded", municipality="Onsdorp")
 
     [line] = _lines(stream)
     assert line["event"] == "environment_loaded"
-    assert line["municipality"] == "Utrecht"
+    assert line["municipality"] == "Onsdorp"
     assert line["level"] == "info"
     assert "timestamp" in line
     assert line["log_type"] != AUDIT_LOG_TYPE
