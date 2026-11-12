@@ -15,11 +15,16 @@ its entries can be committed, even when the caller swallows the error (as
 raises nothing but rolls back. So before the commit the hook reads the
 transaction status from the driver; for an aborted transaction it writes
 nothing and raises ``TransactionAbortedError`` (issue #30), so the caller
-never reports an action as done that was rolled back. The transaction belongs
-to ``audited_transaction``: a caller that ends it inside the block
-(``connection.rollback()`` or ``connection.commit()``) also gets a
-``TransactionAbortedError`` and nothing is written, because after an explicit
-rollback the driver reports an idle connection, not an aborted transaction.
+never reports an action as done that was rolled back.
+
+The transaction belongs to ``audited_transaction``. A block that ends it
+itself (``connection.rollback()`` or ``connection.commit()``) is a programming
+error: ``TransactionOwnershipError`` is raised and no stdout copy is written.
+This is deliberately not a ``TransactionAbortedError``: after an explicit
+commit inside the block the action and its Audit Entries may be stored, so
+"nothing was stored" would be false (and the stored entries have no stdout
+copy). The check is needed because after an explicit rollback the driver
+reports an idle connection, not an aborted transaction.
 Savepoints are not supported: an entry inserted under a
 savepoint that is later rolled back would still be written.
 """
@@ -44,6 +49,16 @@ class TransactionAbortedError(RuntimeError):
     Nothing the block did, including its Audit Entries, was stored, and no
     stdout copy was written. A caller shows the user the same error as for
     ``AuditWriteFailedError``: the action could not be recorded.
+    """
+
+
+class TransactionOwnershipError(RuntimeError):
+    """The block of ``audited_transaction`` ended the transaction itself.
+
+    A programming error, not a failed action: after an explicit commit the
+    action and its Audit Entries may be stored, without a stdout copy. It is
+    deliberately not a ``TransactionAbortedError``, so the HTTP layer answers
+    with the generic internal error, not "the action could not be recorded".
     """
 
 
@@ -86,15 +101,17 @@ async def audited_transaction(
     The transaction commits when the block ends normally and rolls back when
     it raises. Raises ``TransactionAbortedError`` if the block ended normally
     but the transaction could not commit, because a swallowed failure aborted
-    it or the block ended it itself. A failing stdout copy does not raise: the entry and the action
-    it records have been committed, and reporting a failure would be false.
+    it. Raises ``TransactionOwnershipError`` if the block ended the
+    transaction itself. A failing stdout copy does not raise: the entry and
+    the action it records have been committed, and reporting a failure would
+    be false.
     The other entries are still written.
     """
     async with engine.begin() as connection:
         repository = _RememberingAuditRepository(SqlAuditRepository(connection))
         yield AuditedTransaction(connection=connection, audit_repository=repository)
         if not connection.in_transaction():
-            raise TransactionAbortedError(
+            raise TransactionOwnershipError(
                 "audited_transaction owns the transaction; do not end it inside the block"
             )
         # The commit of an aborted transaction raises nothing but rolls back.

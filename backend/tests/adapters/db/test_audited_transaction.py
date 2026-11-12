@@ -18,7 +18,11 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from podiumd_admin.adapters.db.audit import SqlAuditRepository
-from podiumd_admin.adapters.db.unit_of_work import TransactionAbortedError, audited_transaction
+from podiumd_admin.adapters.db.unit_of_work import (
+    TransactionAbortedError,
+    TransactionOwnershipError,
+    audited_transaction,
+)
 from podiumd_admin.adapters.logging import StdoutAuditSink
 from podiumd_admin.application.audit import AuditRecorder
 from podiumd_admin.domain.audit import AuditEntry, Outcome, ReasonCode
@@ -224,7 +228,7 @@ async def test_a_swallowed_action_failure_raises_at_the_commit_and_writes_nothin
     assert not await _stored(app_engine, entry)
 
 
-async def test_ending_the_owned_transaction_inside_the_block_raises_and_writes_nothing(
+async def test_rolling_back_the_owned_transaction_inside_the_block_is_a_programming_error(
     app_engine: AsyncEngine,
 ) -> None:
     # After an explicit rollback the driver reports IDLE, not INERROR, so the
@@ -237,8 +241,32 @@ async def test_ending_the_owned_transaction_inside_the_block_raises_and_writes_n
             await transaction.audit_repository.add(entry)
             await transaction.connection.rollback()
 
-    with pytest.raises(TransactionAbortedError, match="owns the transaction"):
+    with pytest.raises(TransactionOwnershipError, match="owns the transaction") as raised:
         await roll_back_inside()
 
+    # Not "the action could not be recorded": misuse is a programming error.
+    assert not isinstance(raised.value, TransactionAbortedError)
     assert sink.stored == []
     assert not await _stored(app_engine, entry)
+
+
+async def test_committing_the_owned_transaction_inside_the_block_is_a_programming_error(
+    app_engine: AsyncEngine,
+) -> None:
+    # The block committed, so its entry IS stored. Reporting "nothing was
+    # stored" (TransactionAbortedError) would be false, so the misuse gets its
+    # own error. No stdout copy is written for the entry.
+    sink = FakeAuditSink()
+    entry = _entry()
+
+    async def commit_inside() -> None:
+        async with audited_transaction(app_engine, sink) as transaction:
+            await transaction.audit_repository.add(entry)
+            await transaction.connection.commit()
+
+    with pytest.raises(TransactionOwnershipError, match="owns the transaction") as raised:
+        await commit_inside()
+
+    assert not isinstance(raised.value, TransactionAbortedError)
+    assert sink.stored == []
+    assert await _stored(app_engine, entry)

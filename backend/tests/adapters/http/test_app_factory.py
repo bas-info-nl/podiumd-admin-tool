@@ -16,7 +16,10 @@ import pytest
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 
-from podiumd_admin.adapters.db.unit_of_work import TransactionAbortedError
+from podiumd_admin.adapters.db.unit_of_work import (
+    TransactionAbortedError,
+    TransactionOwnershipError,
+)
 from podiumd_admin.adapters.http import create_app
 from podiumd_admin.adapters.http.app import API_PREFIX
 from podiumd_admin.adapters.http.openapi import main, openapi_document
@@ -110,3 +113,24 @@ def test_an_unrecorded_action_tells_the_user_it_could_not_be_recorded(
     assert response.json() == {"error": "action-not-recorded"}
     assert "transaction" not in response.text
     assert "sign-out" not in response.text
+
+
+def test_a_misused_transaction_is_an_internal_error_not_an_unrecorded_action() -> None:
+    """A block that ends the owned transaction itself may have stored the action.
+
+    So the user must not be told that the action could not be recorded.
+    """
+    app = create_app(SETTINGS, readiness=FakeReadiness())
+    router = APIRouter()
+
+    @router.post("/api/v1/test-action")
+    async def act() -> None:
+        raise TransactionOwnershipError("audited_transaction owns the transaction")
+
+    app.include_router(router)
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post("/api/v1/test-action")
+
+    assert response.status_code == 500
+    assert response.json() == {"error": "internal-error"}
