@@ -5,7 +5,9 @@ The connection comes from, in this order:
 1. ``config.attributes["connection"]``: an open connection handed over by the
    caller, as the tests do;
 2. the ``PODIUMD_ADMIN_DATABASE_OWNER_URL`` environment variable, as the Helm
-   pre-install/pre-upgrade Job does.
+   pre-install/pre-upgrade Job does. It is read and validated by
+   ``podiumd_admin.config.load_owner_database_url``; the running instance
+   uses ``PODIUMD_ADMIN_DATABASE_APP_URL`` instead.
 
 Offline mode (``alembic upgrade head --sql``) prints the SQL instead, for an
 installer who wants to review it first.
@@ -21,20 +23,9 @@ from sqlalchemy import Connection, create_engine
 from sqlalchemy.pool import NullPool
 
 from podiumd_admin.adapters.db.tables import metadata
-
-OWNER_URL_ENV = "PODIUMD_ADMIN_DATABASE_OWNER_URL"
+from podiumd_admin.config import DATABASE_OWNER_URL, load_owner_database_url
 
 config = context.config
-
-
-def _owner_url() -> str:
-    url = os.environ.get(OWNER_URL_ENV, "").strip()
-    if not url:
-        raise RuntimeError(
-            f"set {OWNER_URL_ENV} to the database URL of the owner role "
-            "(postgresql+psycopg://podiumd_admin_owner:...@host:5432/database)"
-        )
-    return url
 
 
 def _run(connection: Connection) -> None:
@@ -45,7 +36,7 @@ def _run(connection: Connection) -> None:
 
 def run_migrations_offline() -> None:
     context.configure(
-        url=os.environ.get(OWNER_URL_ENV) or "postgresql+psycopg://",
+        url=os.environ.get(DATABASE_OWNER_URL) or "postgresql+psycopg://",
         target_metadata=metadata,
         literal_binds=True,
     )
@@ -61,7 +52,7 @@ def run_migrations_online() -> None:
 
     if config.config_file_name is not None:
         fileConfig(config.config_file_name, disable_existing_loggers=False)
-    engine = create_engine(_owner_url(), poolclass=NullPool)
+    engine = create_engine(load_owner_database_url(), poolclass=NullPool)
     try:
         with engine.connect() as connection:
             _run(connection)

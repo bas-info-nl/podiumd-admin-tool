@@ -17,12 +17,17 @@ dependencies = [
     "uvicorn[standard]>=0.54.0",
 ]
 
+[project.scripts]
+# Writes the OpenAPI document at build time (the running app serves none).
+podiumd-admin-openapi = "podiumd_admin.adapters.http.openapi:main"
+
 [build-system]
 requires = ["uv_build>=0.8.15,<0.14.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "httpx2>=2.16.0",
     "import-linter>=2.16",
     "mypy>=2.4.1",
     "pip-audit>=2.10.1",

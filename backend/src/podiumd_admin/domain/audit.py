@@ -177,14 +177,18 @@ def normalise_client_ip(value: object) -> str:
     """Return a client IP address in its normalised text form.
 
     Raises ``ValueError`` for anything that is not a single IPv4 or IPv6
-    address, so no free text ends up where a client IP belongs.
+    address, so no free text ends up where a client IP belongs. A scoped IPv6
+    address (with a zone id) is rejected too: PostgreSQL ``INET`` cannot store it.
     """
     if not isinstance(value, str):
         raise ValueError("client_ip must be an IP address in text form")
     try:
-        return ipaddress.ip_address(value.strip()).compressed
+        address = ipaddress.ip_address(value.strip())
     except ValueError:
         raise ValueError(f"client_ip must be an IP address, got {value!r}") from None
+    if isinstance(address, ipaddress.IPv6Address) and address.scope_id is not None:
+        raise ValueError(f"client_ip must not have a zone id, got {value!r}")
+    return address.compressed
 
 
 def _client_ip(value: object) -> str | None:

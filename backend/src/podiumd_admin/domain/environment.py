@@ -19,13 +19,15 @@ type IdentityField = Literal["municipality", "stage", "label"]
 class InvalidEnvironmentIdentityError(ValueError):
     """A configured Environment identity value is missing or invalid.
 
-    ``field`` names the offending part, so the configuration layer can report
-    the setting it came from.
+    ``field`` names the offending part and ``problem`` says what is wrong
+    with it, so the configuration layer can report the problem under the
+    setting it came from.
     """
 
     def __init__(self, field: IdentityField, problem: str) -> None:
         super().__init__(f"invalid Environment identity: {field} {problem}")
         self.field: IdentityField = field
+        self.problem = problem
 
 
 class Stage(StrEnum):
