@@ -19,36 +19,36 @@ from podiumd_admin.domain.environment import (
 
 
 def test_identity_holds_municipality_stage_and_label() -> None:
-    identity = EnvironmentIdentity(municipality="Utrecht", stage=Stage.PROD, label="Hoster B.V.")
+    identity = EnvironmentIdentity(municipality="Onsdorp", stage=Stage.PROD, label="Hoster B.V.")
 
-    assert identity.municipality == "Utrecht"
+    assert identity.municipality == "Onsdorp"
     assert identity.stage is Stage.PROD
     assert identity.label == "Hoster B.V."
 
 
 def test_label_is_optional() -> None:
-    identity = EnvironmentIdentity(municipality="Utrecht", stage=Stage.ACCP)
+    identity = EnvironmentIdentity(municipality="Onsdorp", stage=Stage.ACCP)
 
     assert identity.label is None
 
 
 def test_identity_is_immutable() -> None:
-    identity = EnvironmentIdentity(municipality="Utrecht", stage=Stage.TEST)
+    identity = EnvironmentIdentity(municipality="Onsdorp", stage=Stage.TEST)
 
     with pytest.raises(dataclasses.FrozenInstanceError):
         identity.municipality = "Amsterdam"  # type: ignore[misc]
 
 
 def test_surrounding_whitespace_is_trimmed() -> None:
-    identity = EnvironmentIdentity(municipality="  Utrecht ", stage=Stage.TEST, label=" Hoster ")
+    identity = EnvironmentIdentity(municipality="  Onsdorp ", stage=Stage.TEST, label=" Hoster ")
 
-    assert identity.municipality == "Utrecht"
+    assert identity.municipality == "Onsdorp"
     assert identity.label == "Hoster"
 
 
 @pytest.mark.parametrize("label", ["", "   "])
 def test_blank_label_means_no_label(label: str) -> None:
-    identity = EnvironmentIdentity(municipality="Utrecht", stage=Stage.TEST, label=label)
+    identity = EnvironmentIdentity(municipality="Onsdorp", stage=Stage.TEST, label=label)
 
     assert identity.label is None
 
@@ -71,14 +71,14 @@ def test_non_text_municipality_is_rejected() -> None:
 @pytest.mark.parametrize("stage", ["prod", None, 1])
 def test_stage_that_is_not_a_stage_member_is_rejected(stage: object) -> None:
     with pytest.raises(InvalidEnvironmentIdentityError) as excinfo:
-        EnvironmentIdentity(municipality="Utrecht", stage=stage)  # type: ignore[arg-type]
+        EnvironmentIdentity(municipality="Onsdorp", stage=stage)  # type: ignore[arg-type]
 
     assert excinfo.value.field == "stage"
 
 
 def test_non_text_label_is_rejected() -> None:
     with pytest.raises(InvalidEnvironmentIdentityError) as excinfo:
-        EnvironmentIdentity(municipality="Utrecht", stage=Stage.PROD, label=42)  # type: ignore[arg-type]
+        EnvironmentIdentity(municipality="Onsdorp", stage=Stage.PROD, label=42)  # type: ignore[arg-type]
 
     assert excinfo.value.field == "label"
 
@@ -131,15 +131,15 @@ def test_stage_has_its_display_name(stage: Stage, name: str) -> None:
 
 
 def test_identity_is_built_from_configured_text_values() -> None:
-    identity = EnvironmentIdentity.from_config(municipality="Utrecht", stage="accp", label=None)
+    identity = EnvironmentIdentity.from_config(municipality="Onsdorp", stage="accp", label=None)
 
-    assert identity == EnvironmentIdentity(municipality="Utrecht", stage=Stage.ACCP)
+    assert identity == EnvironmentIdentity(municipality="Onsdorp", stage=Stage.ACCP)
 
 
 @pytest.mark.parametrize("stage", [None, "", "staging"])
 def test_identity_from_config_rejects_a_missing_or_invalid_stage(stage: str | None) -> None:
     with pytest.raises(InvalidEnvironmentIdentityError) as excinfo:
-        EnvironmentIdentity.from_config(municipality="Utrecht", stage=stage)
+        EnvironmentIdentity.from_config(municipality="Onsdorp", stage=stage)
 
     assert excinfo.value.field == "stage"
 

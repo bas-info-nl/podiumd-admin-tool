@@ -22,7 +22,7 @@ from podiumd_admin.ports.audit import AuditLogReader
 pytestmark = pytest.mark.integration
 
 NOW = datetime(2026, 11, 8, 12, 0, tzinfo=UTC)
-ENVIRONMENT = EnvironmentIdentity(municipality="Utrecht", stage=Stage.TEST)
+ENVIRONMENT = EnvironmentIdentity(municipality="Onsdorp", stage=Stage.TEST)
 
 
 def _entry(occurred_at: datetime = NOW, **overrides: Any) -> AuditEntry:

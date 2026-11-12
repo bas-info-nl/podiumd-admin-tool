@@ -34,7 +34,7 @@ from podiumd_admin.ports.audit import AuditLogReader, AuditRepository
 pytestmark = pytest.mark.integration
 
 OCCURRED_AT = datetime(2026, 11, 8, 14, 30, 15, 123456, tzinfo=UTC)
-ENVIRONMENT = EnvironmentIdentity(municipality="Utrecht", stage=Stage.ACCP, label="Hosting B.V.")
+ENVIRONMENT = EnvironmentIdentity(municipality="Onsdorp", stage=Stage.ACCP, label="Hosting B.V.")
 
 
 def _entry(**overrides: Any) -> AuditEntry:
@@ -140,7 +140,7 @@ async def test_every_reason_an_entry_may_hold_can_be_stored(
 
 @pytest.mark.parametrize("stage", list(Stage))
 async def test_every_stage_can_be_stored(app_engine: AsyncEngine, stage: Stage) -> None:
-    entry = _entry(environment=EnvironmentIdentity(municipality="Utrecht", stage=stage))
+    entry = _entry(environment=EnvironmentIdentity(municipality="Onsdorp", stage=stage))
 
     await _add(app_engine, entry)
 
@@ -207,7 +207,7 @@ _RAW_INSERT = text(
 _VALID_ROW = {
     "id": "6a1f4e0e-5d43-4f5e-9f5a-0b8e3b1e2c01",
     "occurred_at": OCCURRED_AT,
-    "environment_municipality": "Utrecht",
+    "environment_municipality": "Onsdorp",
     "environment_stage": "test",
     "action": "sign-in",
     "outcome": "allowed",

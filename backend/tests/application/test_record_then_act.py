@@ -21,7 +21,7 @@ from podiumd_admin.domain.environment import EnvironmentIdentity, Stage
 from podiumd_admin.ports.audit import AuditRepository, AuditSink
 from tests.application.fakes import FakeAuditRepository, FakeAuditSink
 
-ENVIRONMENT = EnvironmentIdentity(municipality="Utrecht", stage=Stage.ACCP)
+ENVIRONMENT = EnvironmentIdentity(municipality="Onsdorp", stage=Stage.ACCP)
 
 
 def _entry(outcome: Outcome = Outcome.ALLOWED, **overrides: Any) -> AuditEntry:

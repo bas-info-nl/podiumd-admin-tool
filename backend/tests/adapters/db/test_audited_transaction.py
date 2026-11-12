@@ -32,7 +32,7 @@ from tests.application.fakes import FakeAuditSink
 
 pytestmark = pytest.mark.integration
 
-ENVIRONMENT = EnvironmentIdentity(municipality="Utrecht", stage=Stage.ACCP)
+ENVIRONMENT = EnvironmentIdentity(municipality="Onsdorp", stage=Stage.ACCP)
 
 
 def _entry(**overrides: Any) -> AuditEntry:
@@ -80,7 +80,7 @@ async def test_a_committed_entry_is_written_to_stdout_once_after_the_commit(
             "event": "audit_entry_stored",
             "id": str(entry.id),
             "occurred_at": "2026-11-08T14:30:00+00:00",
-            "environment_municipality": "Utrecht",
+            "environment_municipality": "Onsdorp",
             "environment_stage": "accp",
             "environment_label": None,
             "action": "sign-out",

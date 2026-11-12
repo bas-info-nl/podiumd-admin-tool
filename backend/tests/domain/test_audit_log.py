@@ -161,7 +161,7 @@ def test_the_outcome_filter_rejects_free_text() -> None:
 def _entry() -> AuditEntry:
     return AuditEntry(
         occurred_at=START,
-        environment=EnvironmentIdentity(municipality="Utrecht", stage=Stage.TEST),
+        environment=EnvironmentIdentity(municipality="Onsdorp", stage=Stage.TEST),
         action="sign-in",
         outcome=Outcome.ALLOWED,
         correlation_id="c-1",
