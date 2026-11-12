@@ -22,7 +22,7 @@ def test_returns_the_environment_identity_without_a_session(client: TestClient) 
 
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/json"
-    assert response.json() == {"municipality": "Utrecht", "stage": "accp", "label": "Hosting BV"}
+    assert response.json() == {"municipality": "Onsdorp", "stage": "accp", "label": "Hosting BV"}
 
 
 @pytest.mark.parametrize("stage", list(Stage))
