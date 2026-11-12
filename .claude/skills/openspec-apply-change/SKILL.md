@@ -9,6 +9,13 @@ metadata:
   generatedBy: "1.2.0"
 ---
 
+> **Not used in this repository.** Implementation goes through the team workflow
+> (`.claude/workflows/implement-task-group.js`, see "Team workflow" in `CLAUDE.md`),
+> which works in a separate worktree with the developer roles and a review.
+> When asked to apply a change, start that workflow in `implement` mode instead of
+> following the steps below. This note is local: `openspec update` regenerates
+> this file, so add it again afterwards.
+
 Implement tasks from an OpenSpec change.
 
 **Input**: Optionally specify a change name. If omitted, check if it can be inferred from conversation context. If vague or ambiguous you MUST prompt for available changes.

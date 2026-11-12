@@ -1,0 +1,40 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.github/scripts/check.sh *)",
+      "Bash(.github/scripts/changed-areas.sh *)",
+      "Bash(.github/scripts/test-changed-areas.sh)",
+      "Bash(.github/scripts/wait-for-pr-feedback.sh *)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git fetch *)",
+      "Bash(git worktree list *)",
+      "Bash(gh repo view *)",
+      "Bash(gh pr view *)",
+      "Bash(gh pr list *)",
+      "Bash(gh pr checks *)",
+      "Bash(gh issue view *)",
+      "Bash(gh issue list *)",
+      "Bash(gh run view *)"
+    ],
+    "deny": [
+      "Bash(gh pr merge *)",
+      "Bash(git push * main)",
+      "Bash(git push * main *)",
+      "Bash(git push *:main)",
+      "Bash(git push *:main *)",
+      "Bash(git push *--force*)",
+      "Bash(git push -f*)",
+      "Bash(git push * -f*)",
+      "Bash(git -C * push * main)",
+      "Bash(git -C * push * main *)",
+      "Bash(git -C * push *:main)",
+      "Bash(git -C * push *:main *)",
+      "Bash(git -C * push *--force*)",
+      "Bash(git -C * push -f*)",
+      "Bash(git -C * push * -f*)"
+    ]
+  }
+}
