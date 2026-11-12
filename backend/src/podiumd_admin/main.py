@@ -2,7 +2,12 @@
 
 uvicorn starts the app with::
 
-    uvicorn --factory podiumd_admin.main:create_app_from_environment
+    uvicorn --factory --no-proxy-headers podiumd_admin.main:create_app_from_environment
+
+``--no-proxy-headers`` matters: by default uvicorn replaces the peer address
+with ``X-Forwarded-For`` when the peer is 127.0.0.1 (such as a mesh sidecar),
+which would bypass ``trustedProxies``. The app resolves the client IP itself
+(``podiumd_admin.adapters.http.client_ip``).
 
 The configuration is loaded first, so a missing or invalid setting stops the
 instance from starting with a ``ConfigurationError`` naming the setting.

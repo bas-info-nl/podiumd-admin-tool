@@ -9,8 +9,12 @@ served, so ``/docs`` and ``/openapi.json`` return 404.
 from __future__ import annotations
 
 import pytest
+from fastapi import APIRouter
 from fastapi.testclient import TestClient
 from httpx2 import Headers
+
+from podiumd_admin.adapters.http import create_app
+from tests.adapters.http.conftest import SETTINGS, FakeReadiness
 
 CSP = "default-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'"
 
@@ -52,3 +56,24 @@ def test_a_header_is_not_duplicated(client: TestClient) -> None:
 
     assert response.headers.get_list("content-security-policy") == [CSP]
     assert response.headers.get_list("cache-control") == ["no-store"]
+
+
+def test_an_unhandled_error_carries_the_security_headers_and_no_detail() -> None:
+    """Starlette answers an unhandled error outside the user middleware; ours must still apply."""
+    app = create_app(SETTINGS, readiness=FakeReadiness())
+    router = APIRouter()
+
+    @router.get("/api/v1/test-crash")
+    async def crash() -> None:
+        raise RuntimeError("secret detail from db:5432")
+
+    app.include_router(router)
+
+    with TestClient(app, raise_server_exceptions=False) as test_client:
+        response = test_client.get("/api/v1/test-crash")
+
+    assert response.status_code == 500
+    _assert_hardened(response.headers)
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json() == {"error": "internal-error"}
+    assert "secret detail" not in response.text
