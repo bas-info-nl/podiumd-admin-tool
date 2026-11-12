@@ -8,7 +8,9 @@ itself, so they are never used.
 
 Resolving never fails: a malformed ``X-Forwarded-For`` falls back to the
 connecting peer, and a peer that is not an IP address (a Unix socket, or a test
-client) gives no client IP. A request must never turn into an error because of
+client) gives no client IP. A scoped IPv6 address (with a zone id, such as
+``fe80::1%eth0``) counts as no address: PostgreSQL ``INET`` cannot store it, so
+it would make the Audit Entry fail. A request must never turn into an error because of
 a header a client can choose.
 """
 
@@ -22,13 +24,19 @@ type IPNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
 
 
 def _parse(value: str) -> IPAddress | None:
-    """The address in ``value``, IPv4-mapped IPv6 as IPv4; ``None`` if it is none."""
+    """The address in ``value``, IPv4-mapped IPv6 as IPv4.
+
+    ``None`` if it is not an address, or is a scoped IPv6 address.
+    """
     try:
         address = ipaddress.ip_address(value.strip())
     except ValueError:
         return None
-    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
-        return address.ipv4_mapped
+    if isinstance(address, ipaddress.IPv6Address):
+        if address.scope_id is not None:
+            return None
+        if address.ipv4_mapped is not None:
+            return address.ipv4_mapped
     return address
 
 

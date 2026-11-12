@@ -79,6 +79,9 @@ def test_an_ipv4_mapped_peer_is_matched_as_ipv4() -> None:
         "198.51.100.7,,10.0.0.5",
         "198.51.100.7:4711",
         "[2001:db8::7]:443",
+        # A zone id is not storable in PostgreSQL INET.
+        "2001:db9::7%eth0",
+        "fe80::1%eth0",
         "unknown",
         "<script>",
         "",
@@ -88,6 +91,8 @@ def test_a_malformed_header_falls_back_to_the_peer(header: str) -> None:
     assert resolve_client_ip("10.1.2.3", [header], trusted_proxies=PROXIES) == "10.1.2.3"
 
 
-@pytest.mark.parametrize("peer", [None, "", "testclient", "unix:/run/app.sock"])
+@pytest.mark.parametrize(
+    "peer", [None, "", "testclient", "unix:/run/app.sock", "fe80::1%eth0", "2001:db8::1%2"]
+)
 def test_an_unusable_peer_gives_no_client_ip(peer: str | None) -> None:
     assert resolve_client_ip(peer, ["198.51.100.7"], trusted_proxies=PROXIES) is None

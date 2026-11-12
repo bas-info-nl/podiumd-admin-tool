@@ -478,7 +478,9 @@ def test_client_ip_is_stored_normalised(given: str, stored: str) -> None:
     assert _entry(client_ip=given).client_ip == stored
 
 
-@pytest.mark.parametrize("value", ["testclient", "192.0.2.10, 10.0.0.1", "", 3232235530])
+@pytest.mark.parametrize(
+    "value", ["testclient", "192.0.2.10, 10.0.0.1", "", 3232235530, "fe80::1%eth0"]
+)
 def test_client_ip_must_be_an_ip_address(value: object) -> None:
     with pytest.raises(InvalidAuditEntryError, match="client_ip"):
         _entry(client_ip=value)
