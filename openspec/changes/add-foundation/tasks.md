@@ -54,12 +54,12 @@
 
 ## 6. Configuration and app bootstrap
 
-- [ ] 6.1 Write failing tests for the pydantic-settings config. Required: the Environment identity, `publicHostname`, the Keycloak issuer and client, the role claim and names, the DB URLs, encryption keys, timeouts (defaults 30 min/8 h, max 12 h), and `trustedProxies` (default empty). Startup fails on missing values or a known development key. Then implement.
-- [ ] 6.2 Create the FastAPI app factory with `/api/v1` routing, docs/redoc/openapi disabled at runtime, and a script that exports `openapi.json` at build time.
-- [ ] 6.3 Write failing tests for the security-headers middleware (CSP, nosniff, Referrer-Policy, `Cache-Control: no-store` on the API, `/docs` and `/openapi.json` → 404). Then implement.
-- [ ] 6.4 Write failing tests for client-IP resolution: honour `X-Forwarded-For` only from `trustedProxies` CIDRs; spoofed headers are ignored by default. Then implement.
-- [ ] 6.5 Write failing tests for the `/healthz` (liveness) and `/readyz` (DB reachable) endpoints, revealing no configuration. Then implement.
-- [ ] 6.6 Write failing tests for the unauthenticated `GET /api/v1/environment`. Then implement.
+- [x] 6.1 Write failing tests for the pydantic-settings config. Required: the Environment identity, `publicHostname`, the Keycloak issuer and client, the role claim and names, the DB URLs, encryption keys, timeouts (defaults 30 min/8 h, max 12 h), and `trustedProxies` (default empty). Startup fails on missing values or a known development key. Then implement.
+- [x] 6.2 Create the FastAPI app factory with `/api/v1` routing, docs/redoc/openapi disabled at runtime, and a script that exports `openapi.json` at build time.
+- [x] 6.3 Write failing tests for the security-headers middleware (CSP, nosniff, Referrer-Policy, `Cache-Control: no-store` on the API, `/docs` and `/openapi.json` → 404). Then implement.
+- [x] 6.4 Write failing tests for client-IP resolution: honour `X-Forwarded-For` only from `trustedProxies` CIDRs; spoofed headers are ignored by default. Then implement.
+- [x] 6.5 Write failing tests for the `/healthz` (liveness) and `/readyz` (DB reachable) endpoints, revealing no configuration. Then implement.
+- [x] 6.6 Write failing tests for the unauthenticated `GET /api/v1/environment`. Then implement.
 
 ## 7. Authentication adapter
 

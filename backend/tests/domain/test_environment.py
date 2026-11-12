@@ -88,6 +88,14 @@ def test_invalid_identity_error_is_a_value_error_naming_the_field() -> None:
         EnvironmentIdentity(municipality="", stage=Stage.PROD)
 
 
+def test_invalid_identity_error_carries_the_problem_without_the_field() -> None:
+    """The configuration layer reports the problem under its own setting name."""
+    with pytest.raises(InvalidEnvironmentIdentityError) as excinfo:
+        Stage.parse("production")
+
+    assert excinfo.value.problem == "must be one of test, accp, prod, got 'production'"
+
+
 # --- Stage --------------------------------------------------------------------
 
 
