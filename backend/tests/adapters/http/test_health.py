@@ -59,7 +59,7 @@ def test_health_responses_reveal_no_configuration(
     bodies = client.get("/healthz").text + client.get("/readyz").text
 
     for value in (
-        "Utrecht",
+        "Onsdorp",
         "accp",
         SETTINGS.public_hostname,
         SETTINGS.oidc_issuer,

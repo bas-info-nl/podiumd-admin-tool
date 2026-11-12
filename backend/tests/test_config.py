@@ -36,10 +36,10 @@ APP_URL = "postgresql+psycopg://podiumd_admin_app:app-password@db:5432/podiumd_a
 OWNER_URL = "postgresql+psycopg://podiumd_admin_owner:owner-password@db:5432/podiumd_admin"
 
 REQUIRED: dict[str, str] = {
-    "PODIUMD_ADMIN_ENVIRONMENT_MUNICIPALITY": "Utrecht",
+    "PODIUMD_ADMIN_ENVIRONMENT_MUNICIPALITY": "Onsdorp",
     "PODIUMD_ADMIN_ENVIRONMENT_STAGE": "accp",
-    "PODIUMD_ADMIN_PUBLIC_HOSTNAME": "admin.podiumd.utrecht.example",
-    "PODIUMD_ADMIN_OIDC_ISSUER": "https://keycloak.utrecht.example/realms/podiumd",
+    "PODIUMD_ADMIN_PUBLIC_HOSTNAME": "admin.podiumd.onsdorp.example",
+    "PODIUMD_ADMIN_OIDC_ISSUER": "https://keycloak.onsdorp.example/realms/podiumd",
     "PODIUMD_ADMIN_OIDC_CLIENT_ID": "podiumd-admin",
     "PODIUMD_ADMIN_OIDC_CLIENT_SECRET": "client-secret-value",
     "PODIUMD_ADMIN_DATABASE_APP_URL": APP_URL,
@@ -69,9 +69,9 @@ def test_loads_the_required_settings_with_defaults(environ: pytest.MonkeyPatch) 
     settings = load_settings()
 
     assert isinstance(settings, Settings)
-    assert settings.environment == EnvironmentIdentity("Utrecht", Stage.ACCP)
-    assert settings.public_hostname == "admin.podiumd.utrecht.example"
-    assert settings.oidc_issuer == "https://keycloak.utrecht.example/realms/podiumd"
+    assert settings.environment == EnvironmentIdentity("Onsdorp", Stage.ACCP)
+    assert settings.public_hostname == "admin.podiumd.onsdorp.example"
+    assert settings.oidc_issuer == "https://keycloak.onsdorp.example/realms/podiumd"
     assert settings.oidc_client_id == "podiumd-admin"
     assert settings.oidc_client_secret.get_secret_value() == "client-secret-value"
     assert settings.role_mapping == RoleMapping.for_client("podiumd-admin")
@@ -95,7 +95,7 @@ def test_loads_every_optional_setting(environ: pytest.MonkeyPatch) -> None:
 
     settings = load_settings()
 
-    assert settings.environment == EnvironmentIdentity("Utrecht", Stage.ACCP, "Hosting BV")
+    assert settings.environment == EnvironmentIdentity("Onsdorp", Stage.ACCP, "Hosting BV")
     assert settings.role_mapping == RoleMapping(
         claim_path=("realm_access", "roles"),
         viewer_role_name="admin-viewer",

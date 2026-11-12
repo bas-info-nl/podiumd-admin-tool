@@ -19,9 +19,9 @@ from podiumd_admin.domain.roles import RoleMapping
 from podiumd_admin.domain.session_timeouts import SessionTimeouts
 
 SETTINGS = Settings(
-    environment=EnvironmentIdentity("Utrecht", Stage.ACCP, "Hosting BV"),
-    public_hostname="admin.podiumd.utrecht.example",
-    oidc_issuer="https://keycloak.utrecht.example/realms/podiumd",
+    environment=EnvironmentIdentity("Onsdorp", Stage.ACCP, "Hosting BV"),
+    public_hostname="admin.podiumd.onsdorp.example",
+    oidc_issuer="https://keycloak.onsdorp.example/realms/podiumd",
     oidc_client_id="podiumd-admin",
     oidc_client_secret=SecretStr("client-secret-value"),
     role_mapping=RoleMapping.for_client("podiumd-admin"),

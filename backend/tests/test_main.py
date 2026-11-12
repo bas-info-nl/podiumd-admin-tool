@@ -27,7 +27,7 @@ def test_builds_the_app_from_the_environment(environ: pytest.MonkeyPatch) -> Non
     app = main.create_app_from_environment()
 
     with TestClient(app) as client:
-        assert client.get("/api/v1/environment").json()["municipality"] == "Utrecht"
+        assert client.get("/api/v1/environment").json()["municipality"] == "Onsdorp"
         assert client.get("/healthz").status_code == 200
 
 
