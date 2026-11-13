@@ -17,7 +17,8 @@ from pydantic import BaseModel
 
 from podiumd_admin import __version__
 from podiumd_admin.adapters.db.unit_of_work import TransactionAbortedError
-from podiumd_admin.adapters.http import environment, health
+from podiumd_admin.adapters.http import auth, environment, health
+from podiumd_admin.adapters.http.auth import AuthServices
 from podiumd_admin.adapters.http.context import AppContext, ReadinessCheck
 from podiumd_admin.adapters.http.security_headers import SecurityHeadersMiddleware
 from podiumd_admin.application.audit import AuditWriteFailedError
@@ -60,14 +61,21 @@ def build_app() -> FastAPI:
     api.include_router(environment.router)
     app.include_router(api)
     app.include_router(health.router)
+    app.include_router(auth.router)
     app.add_middleware(SecurityHeadersMiddleware)
     app.add_exception_handler(AuditWriteFailedError, _action_not_recorded)
     app.add_exception_handler(TransactionAbortedError, _action_not_recorded)
     return app
 
 
-def create_app(settings: Settings, *, readiness: ReadinessCheck) -> FastAPI:
-    """The app for ``settings``; ``readiness`` tells whether the database is reachable."""
+def create_app(
+    settings: Settings, *, readiness: ReadinessCheck, auth: AuthServices | None = None
+) -> FastAPI:
+    """The app for ``settings``.
+
+    ``readiness`` tells whether the database is reachable; ``auth`` holds the
+    authentication use cases.
+    """
     app = build_app()
-    app.state.context = AppContext(settings=settings, readiness=readiness)
+    app.state.context = AppContext(settings=settings, readiness=readiness, auth=auth)
     return app

@@ -56,7 +56,25 @@ def test_the_app_role_has_the_normal_privileges_on_sessions(owner_engine: Engine
     }
 
 
-@pytest.mark.parametrize("table", ["audit_entries", "sessions", "alembic_version"])
+def test_the_app_role_may_read_add_and_remove_sign_in_attempts(owner_engine: Engine) -> None:
+    assert _privileges(owner_engine, "sign_in_attempts") == {
+        "SELECT": True,
+        "INSERT": True,
+        "UPDATE": False,
+        "DELETE": True,
+        "TRUNCATE": False,
+    }
+
+
+def test_sign_in_attempts_are_indexed_for_the_purge(owner_engine: Engine) -> None:
+    indexes = _index_definitions(owner_engine, "sign_in_attempts")
+
+    assert "(expires_at)" in indexes["ix_sign_in_attempts_expires_at"]
+
+
+@pytest.mark.parametrize(
+    "table", ["audit_entries", "sessions", "sign_in_attempts", "alembic_version"]
+)
 def test_the_owner_role_owns_the_tables(owner_engine: Engine, table: str) -> None:
     with owner_engine.connect() as connection:
         owner = connection.execute(
@@ -121,7 +139,9 @@ def test_the_migrations_downgrade_and_upgrade_again(
 
         migrate(database)
         with engine.connect() as connection:
-            assert {"audit_entries", "sessions"} <= set(inspect(connection).get_table_names())
+            assert {"audit_entries", "sessions", "sign_in_attempts"} <= set(
+                inspect(connection).get_table_names()
+            )
     finally:
         engine.dispose()
 
@@ -156,6 +176,13 @@ def test_owner_default_privileges_do_not_widen_the_grants(
             "DELETE": True,
             "TRUNCATE": False,
         }
+        assert _privileges(owner, "sign_in_attempts") == {
+            "SELECT": True,
+            "INSERT": True,
+            "UPDATE": False,
+            "DELETE": True,
+            "TRUNCATE": False,
+        }
         assert not any(_privileges(owner, "alembic_version").values())
     finally:
         owner.dispose()
@@ -167,6 +194,7 @@ def test_owner_default_privileges_do_not_widen_the_grants(
             "DELETE FROM audit_entries",
             "TRUNCATE audit_entries",
             "TRUNCATE sessions",
+            "TRUNCATE sign_in_attempts",
             "SELECT * FROM alembic_version",
             "UPDATE alembic_version SET version_num = version_num",
         ):

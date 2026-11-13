@@ -10,6 +10,9 @@ dependencies = [
     "cryptography>=50.0.2",
     "fastapi>=0.162.2",
     "httpx>=0.28.1",
+    # Authlib's httpx integration uses httpx2 and warns when it falls back to httpx.
+    "httpx2>=2.16.0",
+    "joserfc>=1.8.0",
     "psycopg[binary]>=3.3.8",
     "pydantic-settings>=2.16.2",
     "sqlalchemy[asyncio]>=2.1.8",
@@ -27,7 +30,6 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "httpx2>=2.16.0",
     "import-linter>=2.16",
     "mypy>=2.4.1",
     "pip-audit>=2.10.1",
@@ -84,6 +86,11 @@ strict = true
 files = ["src", "tests"]
 warn_unreachable = true
 
+[[tool.mypy.overrides]]
+# Authlib ships no type hints (no py.typed); the OIDC adapter wraps it.
+module = ["authlib.*"]
+ignore_missing_imports = true
+
 [tool.importlinter]
 root_package = "podiumd_admin"
 # Needed so contracts can forbid third-party packages such as fastapi.
@@ -107,7 +114,9 @@ forbidden_modules = [
   "alembic",
   "psycopg",
   "authlib",
+  "joserfc",
   "httpx",
+  "httpx2",
 ]
 
 [tool.pytest.ini_options]

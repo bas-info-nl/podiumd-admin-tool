@@ -27,6 +27,9 @@ copy). The check is needed because after an explicit rollback the driver
 reports an idle connection, not an aborted transaction.
 Savepoints are not supported: an entry inserted under a
 savepoint that is later rolled back would still be written.
+
+``SqlUnitOfWork`` implements the ``UnitOfWork`` port on top of it: the Audit
+Log, the sessions and the sign-in attempts of one transaction.
 """
 
 from __future__ import annotations
@@ -39,8 +42,14 @@ from psycopg.pq import TransactionStatus
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from podiumd_admin.adapters.db.audit import SqlAuditRepository
+from podiumd_admin.adapters.db.session_crypto import TokenCipher
+from podiumd_admin.adapters.db.sessions import SqlSessionStore
+from podiumd_admin.adapters.db.sign_in_attempts import SqlSignInAttemptStore
 from podiumd_admin.domain.audit import AuditEntry
 from podiumd_admin.ports.audit import AuditRepository, AuditSink
+from podiumd_admin.ports.session import SessionStore
+from podiumd_admin.ports.sign_in import SignInAttemptStore
+from podiumd_admin.ports.unit_of_work import Transaction
 
 
 class TransactionAbortedError(RuntimeError):
@@ -124,3 +133,34 @@ async def audited_transaction(
     for entry in repository.inserted:
         with contextlib.suppress(Exception):
             sink.entry_stored(entry)
+
+
+@dataclass(frozen=True, slots=True)
+class _SqlTransaction:
+    """The stores of one ``audited_transaction``; implements the ``Transaction`` port."""
+
+    audit_repository: AuditRepository
+    sessions: SessionStore
+    sign_in_attempts: SignInAttemptStore
+
+
+class SqlUnitOfWork:
+    """Implements the ``UnitOfWork`` port with ``audited_transaction``.
+
+    Raises ``TransactionAbortedError`` when a swallowed failure aborted the
+    transaction, as ``audited_transaction`` does.
+    """
+
+    def __init__(self, engine: AsyncEngine, sink: AuditSink, cipher: TokenCipher) -> None:
+        self._engine = engine
+        self._sink = sink
+        self._cipher = cipher
+
+    @contextlib.asynccontextmanager
+    async def begin(self) -> AsyncIterator[Transaction]:
+        async with audited_transaction(self._engine, self._sink) as transaction:
+            yield _SqlTransaction(
+                audit_repository=transaction.audit_repository,
+                sessions=SqlSessionStore(transaction.connection, self._cipher),
+                sign_in_attempts=SqlSignInAttemptStore(transaction.connection),
+            )
