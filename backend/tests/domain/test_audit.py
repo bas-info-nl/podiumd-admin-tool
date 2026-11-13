@@ -93,6 +93,7 @@ def test_reason_codes_cover_unauthenticated_failures() -> None:
         "callback-error",
         "token-exchange-failed",
         "no-session",
+        "invalid-logout-token",
     }
 
 

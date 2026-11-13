@@ -33,11 +33,12 @@ from joserfc.jwk import KeySet
 from joserfc.jwt import JWTClaimsRegistry
 
 from podiumd_admin.adapters.system_clock import SystemClock
-from podiumd_admin.domain.identity import VerifiedIdentity
+from podiumd_admin.domain.identity import LogoutNotice, VerifiedIdentity
 from podiumd_admin.domain.session import SessionTokens
 from podiumd_admin.ports.clock import Clock
 from podiumd_admin.ports.identity_provider import (
     IdentityProviderUnavailableError,
+    InvalidLogoutTokenError,
     RefreshRefusedError,
     TokenExchangeError,
 )
@@ -59,6 +60,7 @@ ALGORITHMS: Final = (
     "ES512",
 )
 """Asymmetric signature algorithms only: never ``none`` or a shared-secret HMAC."""
+BACKCHANNEL_LOGOUT_EVENT: Final = "http://schemas.openid.net/event/backchannel-logout"
 
 
 class _InvalidTokenError(Exception):
@@ -205,6 +207,31 @@ class KeycloakIdentityProvider:
             return await self._identity(dict(token), nonce=None, id_token_required=False)
         except _InvalidTokenError:
             raise RefreshRefusedError("the refreshed tokens are not valid") from None
+
+    async def verify_logout_token(self, logout_token: str) -> LogoutNotice:
+        """Validate a logout token (OpenID Connect Back-Channel Logout 1.0, section 2.6).
+
+        Raises ``IdentityProviderUnavailableError`` if the JWKS cannot be fetched.
+        """
+        try:
+            claims = await self._claims(logout_token)
+            self._check(
+                claims,
+                aud={"essential": True, "value": self._client_id},
+                iat={"essential": True},
+                sid={"essential": True},
+            )
+        except _InvalidTokenError:
+            raise InvalidLogoutTokenError("the logout token is not valid") from None
+        events = claims.get("events")
+        if not isinstance(events, dict) or BACKCHANNEL_LOGOUT_EVENT not in events:
+            raise InvalidLogoutTokenError("the logout token has no back-channel logout event")
+        if "nonce" in claims:
+            raise InvalidLogoutTokenError("a logout token must not carry a nonce")
+        sid = claims.get("sid")
+        if not isinstance(sid, str) or not sid.strip():
+            raise InvalidLogoutTokenError("the logout token names no Keycloak session")
+        return LogoutNotice(sid)
 
     async def _identity(
         self, token: Mapping[str, Any], *, nonce: str | None, id_token_required: bool = True

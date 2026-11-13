@@ -43,7 +43,11 @@ from podiumd_admin.domain.session import (
 )
 from podiumd_admin.ports.audit import AuditSink
 from podiumd_admin.ports.clock import Clock
-from podiumd_admin.ports.identity_provider import IdentityProvider, RefreshRefusedError
+from podiumd_admin.ports.identity_provider import (
+    IdentityProvider,
+    InvalidLogoutTokenError,
+    RefreshRefusedError,
+)
 from podiumd_admin.ports.unit_of_work import UnitOfWork
 
 SESSION_EXPIRED_ACTION: Final = "session-expired"
@@ -132,6 +136,41 @@ class Sessions:
         if not saved:
             return None
         return ActiveSession(session_id=session_id, session=session)
+
+    async def end_by_logout_token(
+        self, logout_token: str, *, client_ip: str | None, correlation_id: str
+    ) -> int:
+        """End the Sessions of the Keycloak session a back-channel logout names.
+
+        Returns how many were ended. Raises ``InvalidLogoutTokenError`` for an
+        invalid token, which is counted on stdout under ``client_ip``. Every
+        Session is tried; if an entry could not be stored, its Session stays
+        and the first error is raised afterwards, so Keycloak sees a failure.
+        The entries carry no client IP: the request comes from Keycloak, not
+        from the user's browser.
+        """
+        try:
+            notice = await self._identity_provider.verify_logout_token(logout_token)
+        except InvalidLogoutTokenError:
+            if client_ip is not None:
+                self._failures.record(client_ip, ReasonCode.INVALID_LOGOUT_TOKEN)
+            raise
+        async with self._unit_of_work.begin() as transaction:
+            found = await transaction.sessions.find_by_keycloak_session_id(
+                notice.keycloak_session_id
+            )
+        ended = 0
+        first_error: Exception | None = None
+        for stored in found:
+            ending = _Ending(session=stored.session, ref=stored.ref)
+            try:
+                if await self._end(ending, ReasonCode.BACKCHANNEL_LOGOUT, None, correlation_id):
+                    ended += 1
+            except Exception as error:
+                first_error = first_error or error
+        if first_error is not None:
+            raise first_error
+        return ended
 
     async def expire_abandoned(self) -> int:
         """End every Session past its idle timeout or absolute lifetime; return how many.

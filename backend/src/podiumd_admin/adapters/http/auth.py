@@ -15,28 +15,35 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Annotated, Final
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, urlencode
 
-from fastapi import APIRouter, Cookie, Depends, Query
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Cookie, Depends, Query, Request
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 
 from podiumd_admin.adapters.db.unit_of_work import TransactionAbortedError
 from podiumd_admin.adapters.http.client_ip import client_ip
 from podiumd_admin.adapters.http.context import AppContext, app_context
 from podiumd_admin.adapters.http.correlation import correlation_id
-from podiumd_admin.adapters.http.errors import ACTION_NOT_RECORDED
+from podiumd_admin.adapters.http.errors import ACTION_NOT_RECORDED, ErrorResponse
 from podiumd_admin.application.audit import AuditWriteFailedError
 from podiumd_admin.application.authentication import AuthSettings
 from podiumd_admin.application.sessions import Sessions
 from podiumd_admin.application.sign_in import NoAccess, SignedIn, SignIn
 from podiumd_admin.config import Settings
 from podiumd_admin.domain.sign_in import MAX_RETURN_PATH_LENGTH, SIGN_IN_ATTEMPT_LIFETIME
-from podiumd_admin.ports.identity_provider import IdentityProviderUnavailableError
+from podiumd_admin.ports.identity_provider import (
+    IdentityProviderUnavailableError,
+    InvalidLogoutTokenError,
+)
 
 CALLBACK_PATH: Final = "/auth/callback"
 SIGNED_OUT_PATH: Final = "/signed-out"
 SIGN_IN_ERROR_PATH: Final = "/sign-in-error"
 NO_ACCESS_PATH: Final = "/no-access"
+
+INVALID_LOGOUT_TOKEN: Final = "invalid-logout-token"  # noqa: S105 - an error code
+MAX_LOGOUT_REQUEST_BYTES: Final = 16 * 1024
+"""A logout token is a few hundred bytes; anything much larger is refused unread."""
 
 SESSION_COOKIE: Final = "__Host-podiumd_admin_session"
 SIGN_IN_COOKIE: Final = "__Host-podiumd_admin_sign_in"
@@ -152,3 +159,44 @@ async def callback(
     # The attempt has been used, whatever the outcome.
     response.delete_cookie(SIGN_IN_COOKIE, path="/", secure=True, httponly=True, samesite="lax")
     return response
+
+
+def _invalid_logout_request() -> JSONResponse:
+    response = JSONResponse(ErrorResponse(error=INVALID_LOGOUT_TOKEN).model_dump(), status_code=400)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+async def _logout_token(request: Request) -> str:
+    """The ``logout_token`` form parameter; ``""`` if the request does not carry one."""
+    content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
+    if content_type != "application/x-www-form-urlencoded":
+        return ""
+    body = b""
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > MAX_LOGOUT_REQUEST_BYTES:
+            return ""
+    values = parse_qs(body.decode("ascii", errors="replace")).get("logout_token", [])
+    return values[0] if len(values) == 1 else ""
+
+
+@router.post("/backchannel-logout")
+async def backchannel_logout(
+    request: Request,
+    services: Annotated[AuthServices, Depends(auth_services)],
+    correlation: Annotated[str, Depends(correlation_id)],
+    address: Annotated[str | None, Depends(client_ip)],
+) -> Response:
+    """End the sessions of the Keycloak session the logout token names.
+
+    Keycloak calls this endpoint itself, so it is exempt from the CSRF header.
+    """
+    logout_token = await _logout_token(request)
+    try:
+        await services.sessions.end_by_logout_token(
+            logout_token, client_ip=address, correlation_id=correlation
+        )
+    except InvalidLogoutTokenError:
+        return _invalid_logout_request()
+    return Response(status_code=200, headers={"Cache-Control": "no-store"})
