@@ -92,7 +92,7 @@
 
 ## 10. Container image
 
-- [ ] 10.1 Write a multi-stage Dockerfile: node build → uv install → `python:3.12-slim`, uid 1000, no shell tools needed at runtime, `/tmp` the only writable path.
+- [x] 10.1 Write a multi-stage Dockerfile: node build → uv install → `python:3.12-slim`, uid 1000, no shell tools needed at runtime, `/tmp` the only writable path.
 - [ ] 10.2 Add an `image` job to `ci.yml` that runs hadolint and builds the image. Add a Trivy scan that fails on HIGH or CRITICAL fixable vulnerabilities, and a smoke test: the image starts with a read-only root filesystem and `/healthz` responds. Make the job a required status check.
 
 ## 11. Helm chart `charts/podiumd-admin`
