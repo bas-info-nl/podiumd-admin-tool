@@ -21,13 +21,16 @@ from __future__ import annotations
 
 from collections.abc import Set
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Final
 
-from podiumd_admin.domain.audit import MAX_USER_SUBJECT_LENGTH, MAX_USERNAME_LENGTH
+from podiumd_admin.domain.audit import MAX_USER_SUBJECT_LENGTH, MAX_USERNAME_LENGTH, ReasonCode
 from podiumd_admin.domain.roles import Role
+from podiumd_admin.domain.session_timeouts import SessionTimeouts
 
 MAX_KEYCLOAK_SESSION_ID_LENGTH: Final = 255
+ACCESS_TOKEN_REFRESH_MARGIN: Final = timedelta(seconds=15)
+"""An access token this close to its expiry is refreshed already, so it cannot expire in flight."""
 
 
 class InvalidSessionError(ValueError):
@@ -123,3 +126,30 @@ class Session:
         }
         for name, value in normalised.items():
             object.__setattr__(self, name, value)
+
+
+def expiry_reason(session: Session, now: datetime, timeouts: SessionTimeouts) -> ReasonCode | None:
+    """Why ``session`` has ended by itself at ``now``, or ``None`` if it has not.
+
+    The absolute lifetime (``expires_at``) is checked first, so a session past
+    both limits is recorded as ``max-lifetime``.
+    """
+    if now >= session.expires_at:
+        return ReasonCode.MAX_LIFETIME
+    if now - session.last_seen_at >= timeouts.idle_timeout:
+        return ReasonCode.IDLE
+    return None
+
+
+def access_token_expired(tokens: SessionTokens, now: datetime) -> bool:
+    """Whether the access token must be refreshed before the request is authorised."""
+    return now >= tokens.access_token_expires_at - ACCESS_TOKEN_REFRESH_MARGIN
+
+
+def highest_role(roles: Set[Role]) -> Role | None:
+    """The Role that counts for authorisation: an Operator holds every Viewer permission."""
+    if Role.OPERATOR in roles:
+        return Role.OPERATOR
+    if Role.VIEWER in roles:
+        return Role.VIEWER
+    return None

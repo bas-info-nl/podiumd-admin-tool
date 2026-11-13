@@ -38,6 +38,7 @@ from podiumd_admin.domain.session import SessionTokens
 from podiumd_admin.ports.clock import Clock
 from podiumd_admin.ports.identity_provider import (
     IdentityProviderUnavailableError,
+    RefreshRefusedError,
     TokenExchangeError,
 )
 
@@ -183,6 +184,27 @@ class KeycloakIdentityProvider:
             raise TokenExchangeError(
                 f"the authorisation code could not be exchanged ({type(error).__name__})"
             ) from None
+
+    async def refresh(self, refresh_token: str) -> VerifiedIdentity:
+        endpoints = await self._discover()
+        try:
+            async with self._client() as client:
+                token = await client.refresh_token(endpoints.token, refresh_token=refresh_token)
+        except OAuthError as error:
+            # Not chained: an OAuthError holds Keycloak's free text.
+            if error.error == "invalid_grant":
+                raise RefreshRefusedError("Keycloak refused to refresh the tokens") from None
+            raise IdentityProviderUnavailableError(
+                f"Keycloak answered the refresh with {error.error!r}"
+            ) from None
+        except httpx2.HTTPError:
+            raise IdentityProviderUnavailableError(
+                "Keycloak could not refresh the tokens"
+            ) from None
+        try:
+            return await self._identity(dict(token), nonce=None, id_token_required=False)
+        except _InvalidTokenError:
+            raise RefreshRefusedError("the refreshed tokens are not valid") from None
 
     async def _identity(
         self, token: Mapping[str, Any], *, nonce: str | None, id_token_required: bool = True

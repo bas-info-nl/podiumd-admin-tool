@@ -21,8 +21,14 @@ from podiumd_admin.adapters.http.auth import AuthServices
 from podiumd_admin.adapters.http.context import AppContext, ReadinessCheck
 from podiumd_admin.adapters.http.errors import ACTION_NOT_RECORDED, ErrorResponse
 from podiumd_admin.adapters.http.security_headers import SecurityHeadersMiddleware
+from podiumd_admin.adapters.http.session import (
+    NotSignedInError,
+    identity_provider_unavailable,
+    not_signed_in,
+)
 from podiumd_admin.application.audit import AuditWriteFailedError
 from podiumd_admin.config import Settings
+from podiumd_admin.ports.identity_provider import IdentityProviderUnavailableError
 
 API_PREFIX: Final = "/api/v1"
 TITLE: Final = "PodiumD Admin Tool"
@@ -58,6 +64,8 @@ def build_app() -> FastAPI:
     app.add_middleware(SecurityHeadersMiddleware)
     app.add_exception_handler(AuditWriteFailedError, _action_not_recorded)
     app.add_exception_handler(TransactionAbortedError, _action_not_recorded)
+    app.add_exception_handler(NotSignedInError, not_signed_in)
+    app.add_exception_handler(IdentityProviderUnavailableError, identity_provider_unavailable)
     return app
 
 
