@@ -13,13 +13,18 @@ access-control, "Roles". Design D2 and D4:
   is only inserted if this call removed the Session, so two requests (or a
   request and the sweep) can never both record the same expiry. If the entry
   cannot be stored, the transaction rolls back and the Session stays, so the
-  expiry sweep records it later.
+  expiry sweep records it later;
+- the expiry sweep (``expire_abandoned``) finds Sessions whose user never
+  returned, ends them the same way, without a client IP, and purges expired
+  sign-in attempts. The app runs it every minute, in its single replica
+  (ADR 0010).
 """
 
 from __future__ import annotations
 
 import contextlib
 import dataclasses
+import uuid
 from dataclasses import dataclass
 from typing import Final
 
@@ -42,6 +47,8 @@ from podiumd_admin.ports.identity_provider import IdentityProvider, RefreshRefus
 from podiumd_admin.ports.unit_of_work import UnitOfWork
 
 SESSION_EXPIRED_ACTION: Final = "session-expired"
+SWEEP_BATCH_SIZE: Final = 100
+"""How many expired Sessions the sweep reads at a time."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,6 +132,37 @@ class Sessions:
         if not saved:
             return None
         return ActiveSession(session_id=session_id, session=session)
+
+    async def expire_abandoned(self) -> int:
+        """End every Session past its idle timeout or absolute lifetime; return how many.
+
+        All entries of one sweep share a correlation id. A Session whose entry
+        cannot be stored stays, and is tried again by the next sweep.
+        """
+        now = self._clock.now()
+        correlation_id = f"expiry-sweep-{uuid.uuid4().hex}"
+        idle_since = now - self._settings.timeouts.idle_timeout
+        ended = 0
+        while True:
+            async with self._unit_of_work.begin() as transaction:
+                found = await transaction.sessions.find_expired(
+                    last_seen_before=idle_since, now=now, limit=SWEEP_BATCH_SIZE
+                )
+            ended_in_batch = 0
+            for stored in found:
+                reason = expiry_reason(stored.session, now, self._settings.timeouts)
+                ending = _Ending(session=stored.session, ref=stored.ref)
+                with contextlib.suppress(Exception):
+                    if await self._end(ending, reason or ReasonCode.IDLE, None, correlation_id):
+                        ended_in_batch += 1
+            ended += ended_in_batch
+            # A short batch was the last one. A batch in which nothing could
+            # be ended would be found again, so the next sweep retries it.
+            if len(found) < SWEEP_BATCH_SIZE or ended_in_batch == 0:
+                break
+        async with self._unit_of_work.begin() as transaction:
+            await transaction.sign_in_attempts.purge_expired(now)
+        return ended
 
     async def _get(self, session_id: str | None) -> Session | None:
         if not session_id:
