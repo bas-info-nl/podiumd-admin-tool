@@ -20,6 +20,7 @@ from pydantic import SecretStr
 
 from podiumd_admin.adapters.http import create_app
 from podiumd_admin.adapters.http.auth import AuthServices, auth_settings
+from podiumd_admin.application.authorisation import Authoriser
 from podiumd_admin.application.sessions import Sessions
 from podiumd_admin.application.sign_in import SignIn
 from podiumd_admin.application.unauthenticated_failures import UnauthenticatedFailureAggregator
@@ -112,7 +113,13 @@ def world() -> AuthWorld:
         "failures": failures,
         "clock": clock,
     }
-    services = AuthServices(sign_in=SignIn(**common), sessions=Sessions(**common))
+    services = AuthServices(
+        sign_in=SignIn(**common),
+        sessions=Sessions(**common),
+        authoriser=Authoriser(
+            settings=common["settings"], unit_of_work=unit_of_work, audit_sink=sink, clock=clock
+        ),
+    )
     return AuthWorld(clock, sink, unit_of_work, identity_provider, failures, services)
 
 

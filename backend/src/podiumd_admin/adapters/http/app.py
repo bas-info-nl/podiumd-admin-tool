@@ -16,17 +16,19 @@ from fastapi.responses import JSONResponse
 
 from podiumd_admin import __version__
 from podiumd_admin.adapters.db.unit_of_work import TransactionAbortedError
-from podiumd_admin.adapters.http import auth, environment, health
+from podiumd_admin.adapters.http import auth, environment, health, session
 from podiumd_admin.adapters.http.auth import AuthServices
 from podiumd_admin.adapters.http.context import AppContext, ReadinessCheck
 from podiumd_admin.adapters.http.errors import ACTION_NOT_RECORDED, ErrorResponse
 from podiumd_admin.adapters.http.security_headers import SecurityHeadersMiddleware
 from podiumd_admin.adapters.http.session import (
     NotSignedInError,
+    access_denied,
     identity_provider_unavailable,
     not_signed_in,
 )
 from podiumd_admin.application.audit import AuditWriteFailedError
+from podiumd_admin.application.authorisation import AccessDeniedError
 from podiumd_admin.config import Settings
 from podiumd_admin.ports.identity_provider import IdentityProviderUnavailableError
 
@@ -58,6 +60,7 @@ def build_app() -> FastAPI:
     )
     api = APIRouter(prefix=API_PREFIX)
     api.include_router(environment.router)
+    api.include_router(session.router)
     app.include_router(api)
     app.include_router(health.router)
     app.include_router(auth.router)
@@ -65,6 +68,7 @@ def build_app() -> FastAPI:
     app.add_exception_handler(AuditWriteFailedError, _action_not_recorded)
     app.add_exception_handler(TransactionAbortedError, _action_not_recorded)
     app.add_exception_handler(NotSignedInError, not_signed_in)
+    app.add_exception_handler(AccessDeniedError, access_denied)
     app.add_exception_handler(IdentityProviderUnavailableError, identity_provider_unavailable)
     return app
 

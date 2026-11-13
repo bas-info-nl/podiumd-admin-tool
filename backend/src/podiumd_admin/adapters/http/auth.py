@@ -27,6 +27,7 @@ from podiumd_admin.adapters.http.correlation import correlation_id
 from podiumd_admin.adapters.http.errors import ACTION_NOT_RECORDED, ErrorResponse
 from podiumd_admin.application.audit import AuditWriteFailedError
 from podiumd_admin.application.authentication import AuthSettings
+from podiumd_admin.application.authorisation import Authoriser
 from podiumd_admin.application.sessions import Sessions
 from podiumd_admin.application.sign_in import NoAccess, SignedIn, SignIn
 from podiumd_admin.config import Settings
@@ -57,6 +58,7 @@ class AuthServices:
 
     sign_in: SignIn
     sessions: Sessions
+    authoriser: Authoriser
 
 
 def public_url(settings: Settings, path: str) -> str:

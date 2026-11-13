@@ -28,6 +28,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Final
 
+from podiumd_admin.application.audit import AuditRecorder
 from podiumd_admin.application.authentication import AuthSettings
 from podiumd_admin.application.unauthenticated_failures import UnauthenticatedFailureAggregator
 from podiumd_admin.domain.audit import AuditEntry, Outcome, ReasonCode
@@ -51,6 +52,7 @@ from podiumd_admin.ports.identity_provider import (
 from podiumd_admin.ports.unit_of_work import UnitOfWork
 
 SESSION_EXPIRED_ACTION: Final = "session-expired"
+SIGN_OUT_ACTION: Final = "sign-out"
 SWEEP_BATCH_SIZE: Final = 100
 """How many expired Sessions the sweep reads at a time."""
 
@@ -136,6 +138,40 @@ class Sessions:
         if not saved:
             return None
         return ActiveSession(session_id=session_id, session=session)
+
+    async def sign_out(
+        self, active: ActiveSession, *, client_ip: str | None, correlation_id: str
+    ) -> str:
+        """End the Session after recording ``sign-out``/``allowed``; return the Keycloak logout URL.
+
+        The caller has authorised the request. The URL is Keycloak's
+        ``end_session_endpoint`` with ``id_token_hint`` and the configured
+        post-sign-out redirect URI; it is built first, so nothing is ended if
+        Keycloak's metadata cannot be read. Raises ``AuditWriteFailedError``
+        (or the unit of work's error for an aborted transaction) if the entry
+        could not be stored; the Session is kept then.
+        """
+        tokens = active.session.tokens
+        url = await self._identity_provider.end_session_url(
+            id_token_hint=tokens.id_token if tokens is not None else None,
+            post_logout_redirect_uri=self._settings.post_logout_redirect_uri,
+        )
+        entry = AuditEntry(
+            occurred_at=self._clock.now(),
+            environment=self._settings.environment,
+            action=SIGN_OUT_ACTION,
+            outcome=Outcome.ALLOWED,
+            user_subject=active.session.user_subject,
+            username=active.session.username,
+            correlation_id=correlation_id,
+            client_ip=client_ip,
+        )
+        async with self._unit_of_work.begin() as transaction:
+            recorder = AuditRecorder(repository=transaction.audit_repository, sink=self._audit_sink)
+            await recorder.record_then_act(
+                entry, lambda: transaction.sessions.remove(active.session_id)
+            )
+        return url
 
     async def end_by_logout_token(
         self, logout_token: str, *, client_ip: str | None, correlation_id: str

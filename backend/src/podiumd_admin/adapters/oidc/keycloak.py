@@ -23,6 +23,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Final
+from urllib.parse import urlencode
 
 import httpx2
 from authlib.integrations.base_client import OAuthError
@@ -207,6 +208,23 @@ class KeycloakIdentityProvider:
             return await self._identity(dict(token), nonce=None, id_token_required=False)
         except _InvalidTokenError:
             raise RefreshRefusedError("the refreshed tokens are not valid") from None
+
+    async def end_session_url(
+        self, *, id_token_hint: str | None, post_logout_redirect_uri: str
+    ) -> str:
+        """Keycloak's ``end_session_endpoint`` with the hint and the redirect.
+
+        Without that endpoint in the realm's metadata, the user goes straight
+        to the signed-out page.
+        """
+        endpoints = await self._discover()
+        if endpoints.end_session is None:
+            return post_logout_redirect_uri
+        query = {"client_id": self._client_id, "post_logout_redirect_uri": post_logout_redirect_uri}
+        if id_token_hint is not None:
+            query["id_token_hint"] = id_token_hint
+        separator = "&" if "?" in endpoints.end_session else "?"
+        return f"{endpoints.end_session}{separator}{urlencode(query)}"
 
     async def verify_logout_token(self, logout_token: str) -> LogoutNotice:
         """Validate a logout token (OpenID Connect Back-Channel Logout 1.0, section 2.6).
