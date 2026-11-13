@@ -45,3 +45,14 @@ updates:
     groups:
       github-actions:
         patterns: ["*"]
+
+  # The Trivy image for the image scan, the only docker update Dependabot can
+  # make: the main Dockerfile takes its base image versions as build args
+  # (from .nvmrc and backend/.python-version), which Dependabot cannot resolve,
+  # so those digests are bumped by hand together with the version files.
+  - package-ecosystem: docker
+    directory: /.github/tools/trivy
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7

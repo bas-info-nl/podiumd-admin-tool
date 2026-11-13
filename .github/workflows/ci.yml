@@ -20,14 +20,14 @@ concurrency:
 env:
   FORCE_COLOR: "1"
 
-# Path gate. On pull requests, `backend` and `frontend` only run when the PR
-# touches their area; `changes` decides that with .github/scripts/changed-areas.sh,
+# Path gate. On pull requests, `backend`, `frontend` and `image` only run when
+# the PR touches their area; `changes` decides that with .github/scripts/changed-areas.sh,
 # which also documents the area mapping. Push to main and workflow_dispatch
 # always run everything, and `hygiene` runs on every event because gitleaks,
 # actionlint and pre-commit cover all files.
 #
-# `on.pull_request.paths` is deliberately not used: backend, frontend and
-# hygiene are required status checks on main, and a workflow that does not start
+# `on.pull_request.paths` is deliberately not used: backend, frontend, image
+# and hygiene are required status checks on main, and a workflow that does not start
 # never reports them, so the PR waits on "Expected" forever. A job skipped by a
 # job-level `if:` reports as skipped, which satisfies a required check.
 #
@@ -41,6 +41,7 @@ jobs:
     outputs:
       backend: ${{ steps.areas.outputs.backend }}
       frontend: ${{ steps.areas.outputs.frontend }}
+      image: ${{ steps.areas.outputs.image }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -163,6 +164,48 @@ jobs:
           name: frontend-coverage
           path: frontend/coverage/
           if-no-files-found: ignore
+
+  # The container image (task 10.2, ADR 0007). The same commands as
+  # `.github/scripts/check.sh image`; change the two together.
+  image:
+    name: image
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.image != 'false' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # hadolint runs through pre-commit, which is locked in backend/uv.lock;
+      # its version is the hook rev in .pre-commit-config.yaml.
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version-file: backend/pyproject.toml
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: hadolint
+        run: uv run --project backend --locked pre-commit run hadolint --all-files
+
+      - name: Dockerfile pins images by digest and writes no version
+        run: .github/scripts/check-dockerfile-versions.sh Dockerfile
+
+      # The Node.js and Python versions come from their single sources.
+      - name: docker build
+        run: |
+          docker build \
+            --build-arg NODE_BASE_VERSION="$(cat .nvmrc)" \
+            --build-arg PYTHON_BASE_VERSION="$(cat backend/.python-version)" \
+            --tag podiumd-admin:ci .
+
+      - name: Smoke test (read-only root filesystem, /healthz, --no-proxy-headers)
+        run: .github/scripts/image-smoke-test.sh podiumd-admin:ci
+
+      # The Trivy version is the FROM in .github/tools/trivy/Dockerfile.
+      - name: Trivy (fails on fixable HIGH or CRITICAL vulnerabilities)
+        run: .github/scripts/image-scan.sh podiumd-admin:ci
 
   hygiene:
     name: hygiene
