@@ -180,6 +180,9 @@ jobs:
       - name: Test the path gate (changed-areas.sh)
         run: .github/scripts/test-changed-areas.sh
 
+      - name: Test the PR feedback wait (wait-for-pr-feedback.sh)
+        run: .github/scripts/test-wait-for-pr-feedback.sh
+
       # pre-commit is locked in backend/uv.lock, and the ruff, prettier and
       # eslint hooks use the locked backend and frontend tools.
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
@@ -198,6 +201,11 @@ jobs:
         run: |
           (cd backend && uv sync --locked)
           (cd frontend && npm ci)
+
+      # pre-commit skips .claude/, so the agent setup has its own tests: the
+      # role files, the shared settings and the workflow script's control flow.
+      - name: Test the agent setup (.claude/tests)
+        run: node --test ".claude/tests/*.test.mjs"
 
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:

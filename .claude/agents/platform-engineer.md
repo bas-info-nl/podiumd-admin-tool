@@ -40,7 +40,9 @@ First follow the **Developer rules** in `CLAUDE.md`. They cover scope, test-firs
 - **Runtime hardening (ADR 0007):** non-root, read-only root filesystem, no privilege escalation, all capabilities dropped, and `/tmp` as an emptyDir.
 
 ## Your checks
-- `.github/scripts/check.sh hooks`. This runs the path-gate tests (`test-changed-areas.sh`) and `pre-commit run --all-files`, which covers actionlint, shellcheck, hadolint, gitleaks and node-engines.
+- `.github/scripts/check.sh hooks`. This runs the script tests (`test-changed-areas.sh`, `test-wait-for-pr-feedback.sh`), the agent setup tests (`.claude/tests/`) and `pre-commit run --all-files`, which covers actionlint, zizmor, shellcheck, hadolint, gitleaks and node-engines.
+- zizmor audits every workflow, `dependabot.yml` and the pre-commit config. Fix what it reports; suppress a finding only with an inline `# zizmor: ignore[<audit>]` comment that says why.
+- `scorecard.yml` must stay within what Scorecard accepts for published results: no workflow-level write permissions, `env` or `defaults`, and only the actions it already uses, without `run:` steps.
 - When you change a check command, change it in `.github/scripts/check.sh` and in `ci.yml` together.
 - For the chart: `helm lint`, helm-unittest, and `helm template` validated with kubeconform.
 - For the image: build it, run it with a read-only root filesystem, and smoke-test `/healthz`.

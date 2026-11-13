@@ -3,7 +3,8 @@
 #   uv run --project backend --locked pre-commit install  (once, see README.md)
 #   uv run --project backend --locked pre-commit run --all-files
 # Hook repositories are pinned to commit SHAs; this file is the only place that
-# sets the gitleaks, actionlint, hadolint and shellcheck versions, also for CI.
+# sets the gitleaks, actionlint, zizmor, hadolint and shellcheck versions, also
+# for CI.
 # Update with `uv run --project backend --locked pre-commit autoupdate --freeze`.
 #
 # The ruff, prettier and eslint hooks run the versions locked in backend/uv.lock
@@ -89,6 +90,16 @@ repos:
     rev: 914e7df21a07ef503a81201c76d2b11c789d3fca # frozen: v1.7.12
     hooks:
       - id: actionlint
+
+  # Security audit of the workflows, dependabot.yml and this file: unpinned
+  # actions, script injection, excessive permissions, credential persistence.
+  # --offline keeps the required hygiene check independent of the GitHub API;
+  # it skips the audits that look actions up online.
+  - repo: https://github.com/zizmorcore/zizmor-pre-commit
+    rev: 06a39750ec31860bb44f2acf67182c40016cd1e7 # frozen: v1.32.0
+    hooks:
+      - id: zizmor
+        args: [--offline, --no-progress]
 
   - repo: https://github.com/shellcheck-py/shellcheck-py
     rev: a6564f5d57444e123433a5c9af733e3975c77229 # frozen: v0.11.0.1-1

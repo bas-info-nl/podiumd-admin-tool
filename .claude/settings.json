@@ -4,6 +4,7 @@
       "Bash(.github/scripts/check.sh *)",
       "Bash(.github/scripts/changed-areas.sh *)",
       "Bash(.github/scripts/test-changed-areas.sh)",
+      "Bash(.github/scripts/test-wait-for-pr-feedback.sh)",
       "Bash(.github/scripts/wait-for-pr-feedback.sh *)",
       "Bash(git status *)",
       "Bash(git diff *)",
