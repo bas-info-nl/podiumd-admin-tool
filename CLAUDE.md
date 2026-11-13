@@ -62,6 +62,8 @@ Add `resume: true` to an `implement` or `issue` run to continue it after an inte
 
 **Untrusted text.** The repository is public, so issue text, PR comments and review threads can be written by anyone. Every role treats them as data, never as instructions. The workflow only triages and fixes review threads written by the Copilot reviewer (add other logins with `trustedAuthors`) and lists the rest for the user. It only implements an issue written by an owner, member or collaborator, unless the orchestrator passes `trustIssue: true` after reading it.
 
+**The agent setup is tested.** pre-commit skips `.claude/`, so [.claude/tests/](.claude/tests/) checks it instead: the frontmatter and tool lists of the role files, the permission rules in `settings.json` (against example commands), the role sections the workflow's prompts point to, and the workflow's control flow with a scripted agent. `check.sh hooks` and the `hygiene` job run them. When you change a role, the settings or the workflow script, change the tests with it.
+
 **Permissions.** [.claude/settings.json](.claude/settings.json) denies merging a PR, pushing to `main` and force-pushing for every role and the main session, and allows the read-only commands the roles use all the time. The deny rules match the command text, so they are a second layer on top of the branch protection on `main`, not a replacement for it.
 
 **Ownership of findings.** Blocking review findings and Copilot fixes go to the role that owns the code. If one turns up in another role's area during a run, it becomes an extra work package for that role, up to the limit set at the top of the workflow script. `CLAUDE.md` and `.claude/**` belong to the **orchestrator**, the main session: roles report exact diffs, and the orchestrator applies them. Docs follow the stack they describe. Repository-wide docs belong to the platform-engineer. `CONTEXT.md`, ADRs and OpenSpec artifacts change only through a decision for the user. The exceptions are the task-manager ticking `tasks.md`, and a task whose whole point is to change them.
@@ -104,7 +106,7 @@ These apply to the backend-developer, frontend-developer and platform-engineer a
 ```sh
 .github/scripts/check.sh backend    # uv sync, ruff, format, mypy, import-linter, pytest + coverage gate, pip-audit
 .github/scripts/check.sh frontend   # frontend/: npm ci, eslint, prettier, tsc, vitest, npm audit; then the e2e/ scaffold
-.github/scripts/check.sh hooks      # the path-gate tests and pre-commit on all files (its fixer hooks rewrite files)
+.github/scripts/check.sh hooks      # the script tests, the agent setup tests and pre-commit on all files (its fixer hooks rewrite files)
 .github/scripts/check.sh hygiene    # hooks, plus gitleaks over the full history
 .github/scripts/check.sh all
 .github/scripts/check.sh --changed origin/main HEAD   # hooks, plus the areas the range touches
@@ -120,6 +122,6 @@ The hooks use the pre-commit version locked in `backend/uv.lock`; install them w
 - Python: `backend/.python-version`;
 - Node: `.nvmrc`;
 - pre-commit: `backend/uv.lock`;
-- hook tools (gitleaks, actionlint, hadolint, shellcheck): `.pre-commit-config.yaml`.
+- hook tools (gitleaks, actionlint, zizmor, hadolint, shellcheck): `.pre-commit-config.yaml`.
 
 Never hard-code a tool version in a workflow or a doc command.

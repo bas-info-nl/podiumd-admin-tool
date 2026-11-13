@@ -9,7 +9,8 @@
 # Areas:
 #   backend    the `backend` job in .github/workflows/ci.yml
 #   frontend   the `frontend` job: frontend/ and the e2e/ scaffold
-#   hooks      the path-gate tests and `pre-commit run --all-files`
+#   hooks      the script tests, the agent setup tests (.claude/tests/) and
+#              `pre-commit run --all-files`
 #   hygiene    `hooks` plus gitleaks over the full history (the `hygiene` job)
 #   all        backend, frontend and hygiene
 #
@@ -73,6 +74,10 @@ check_frontend() (
 check_hooks() (
   cd "$root"
   step .github/scripts/test-changed-areas.sh
+  step .github/scripts/test-wait-for-pr-feedback.sh
+  # pre-commit skips .claude/, so the agent setup has its own tests: the role
+  # files, the shared settings and the control flow of the workflow script.
+  step node --test ".claude/tests/*.test.mjs"
   # The ruff, prettier and eslint hooks use the locked backend and frontend tools.
   (cd backend && step uv sync --locked)
   (cd frontend && step npm ci)

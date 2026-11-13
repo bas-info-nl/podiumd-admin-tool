@@ -1,11 +1,17 @@
 # Weekly dependency updates (design D9). Minor and patch updates are grouped
 # per ecosystem to keep the number of PRs manageable; majors arrive one by one.
+#
+# Cooldown: a version update is only proposed once the release is a week old,
+# so a compromised release has time to be noticed and withdrawn (GitHub's own
+# default is 3 days). Security updates are not delayed by it.
 version: 2
 updates:
   - package-ecosystem: uv
     directory: /backend
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       python-minor-and-patch:
         update-types: [minor, patch]
@@ -14,6 +20,8 @@ updates:
     directory: /frontend
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       frontend-minor-and-patch:
         update-types: [minor, patch]
@@ -22,6 +30,8 @@ updates:
     directory: /e2e
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       e2e-minor-and-patch:
         update-types: [minor, patch]
@@ -30,6 +40,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       github-actions:
         patterns: ["*"]
