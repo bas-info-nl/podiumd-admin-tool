@@ -17,14 +17,18 @@ from dataclasses import dataclass
 from typing import Annotated, Final
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Cookie, Depends, Query
 from fastapi.responses import RedirectResponse
 
+from podiumd_admin.adapters.db.unit_of_work import TransactionAbortedError
+from podiumd_admin.adapters.http.client_ip import client_ip
 from podiumd_admin.adapters.http.context import AppContext, app_context
 from podiumd_admin.adapters.http.correlation import correlation_id
+from podiumd_admin.adapters.http.errors import ACTION_NOT_RECORDED
+from podiumd_admin.application.audit import AuditWriteFailedError
 from podiumd_admin.application.authentication import AuthSettings
 from podiumd_admin.application.sessions import Sessions
-from podiumd_admin.application.sign_in import SignIn
+from podiumd_admin.application.sign_in import NoAccess, SignedIn, SignIn
 from podiumd_admin.config import Settings
 from podiumd_admin.domain.sign_in import MAX_RETURN_PATH_LENGTH, SIGN_IN_ATTEMPT_LIFETIME
 from podiumd_admin.ports.identity_provider import IdentityProviderUnavailableError
@@ -107,4 +111,44 @@ async def sign_in(
         started.attempt_id,
         max_age=int(SIGN_IN_ATTEMPT_LIFETIME.total_seconds()),
     )
+    return response
+
+
+@router.get("/callback")
+async def callback(
+    services: Annotated[AuthServices, Depends(auth_services)],
+    correlation: Annotated[str, Depends(correlation_id)],
+    address: Annotated[str | None, Depends(client_ip)],
+    attempt_id: Annotated[str | None, Cookie(alias=SIGN_IN_COOKIE, max_length=255)] = None,
+    state: Annotated[str | None, Query(max_length=255)] = None,
+    code: Annotated[str | None, Query(max_length=4096)] = None,
+    error: Annotated[str | None, Query(max_length=255)] = None,
+) -> RedirectResponse:
+    """Complete the sign-in Keycloak sent the browser back from.
+
+    A session cookie the browser already holds is ignored: every successful
+    sign-in gets a new session identifier. Keycloak's ``error_description``
+    is never read.
+    """
+    try:
+        result = await services.sign_in.complete(
+            attempt_id=attempt_id,
+            state=state,
+            code=code,
+            error=error,
+            client_ip=address,
+            correlation_id=correlation,
+        )
+    except (AuditWriteFailedError, TransactionAbortedError):
+        response = _page(SIGN_IN_ERROR_PATH, error=ACTION_NOT_RECORDED, correlation_id=correlation)
+    else:
+        if isinstance(result, SignedIn):
+            response = _redirect(result.return_path)
+            set_cookie(response, SESSION_COOKIE, result.session_id, max_age=None)
+        elif isinstance(result, NoAccess):
+            response = _redirect(NO_ACCESS_PATH)
+        else:
+            response = _page(SIGN_IN_ERROR_PATH, correlation_id=correlation)
+    # The attempt has been used, whatever the outcome.
+    response.delete_cookie(SIGN_IN_COOKIE, path="/", secure=True, httponly=True, samesite="lax")
     return response

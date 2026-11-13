@@ -16,16 +16,21 @@ access-control, "Users without a role are refused". Design D2:
 
 from __future__ import annotations
 
+import contextlib
+import hmac
 from dataclasses import dataclass
 from typing import Final
 
+from podiumd_admin.application.audit import AuditRecorder
 from podiumd_admin.application.authentication import AuthSettings, new_random_value
 from podiumd_admin.application.unauthenticated_failures import UnauthenticatedFailureAggregator
-from podiumd_admin.domain.audit import ReasonCode
+from podiumd_admin.domain.audit import AuditEntry, Outcome, ReasonCode
+from podiumd_admin.domain.roles import role_from_claims
+from podiumd_admin.domain.session import Session
 from podiumd_admin.domain.sign_in import SignInAttempt
 from podiumd_admin.ports.audit import AuditSink
 from podiumd_admin.ports.clock import Clock
-from podiumd_admin.ports.identity_provider import IdentityProvider
+from podiumd_admin.ports.identity_provider import IdentityProvider, TokenExchangeError
 from podiumd_admin.ports.unit_of_work import UnitOfWork
 
 SIGN_IN_ACTION: Final = "sign-in"
@@ -105,3 +110,103 @@ class SignIn:
         async with self._unit_of_work.begin() as transaction:
             await transaction.sign_in_attempts.add(attempt_id, attempt)
         return SignInStarted(attempt_id=attempt_id, authorization_url=url)
+
+    async def complete(
+        self,
+        *,
+        attempt_id: str | None,
+        state: str | None,
+        code: str | None,
+        error: str | None,
+        client_ip: str | None,
+        correlation_id: str,
+    ) -> SignInResult:
+        """Use the attempt once and, if Keycloak vouches for the user, sign them in.
+
+        ``error`` is only checked for presence: Keycloak's free text is never
+        stored. Raises ``AuditWriteFailedError`` if the ``sign-in`` Audit Entry
+        could not be stored, and the unit of work's error if its transaction
+        was aborted (issue #30); no session exists then.
+        """
+        attempt = await self._take(attempt_id)
+        now = self._clock.now()
+        if (
+            attempt is None
+            or attempt.is_expired(now)
+            or state is None
+            or not hmac.compare_digest(attempt.state.encode(), state.encode())
+        ):
+            return self._failed(ReasonCode.INVALID_STATE, client_ip)
+        if error is not None or not code:
+            return self._failed(ReasonCode.CALLBACK_ERROR, client_ip)
+        try:
+            identity = await self._identity_provider.exchange_code(
+                code=code,
+                redirect_uri=self._settings.redirect_uri,
+                code_verifier=attempt.code_verifier,
+                nonce=attempt.nonce,
+            )
+        except TokenExchangeError:
+            return self._failed(ReasonCode.TOKEN_EXCHANGE_FAILED, client_ip)
+
+        def entry(outcome: Outcome, reason: ReasonCode | None = None) -> AuditEntry:
+            return AuditEntry(
+                occurred_at=now,
+                environment=self._settings.environment,
+                action=SIGN_IN_ACTION,
+                outcome=outcome,
+                reason=reason,
+                user_subject=identity.subject,
+                username=identity.username,
+                correlation_id=correlation_id,
+                client_ip=client_ip,
+            )
+
+        role = role_from_claims(identity.claims, self._settings.role_mapping)
+        if role is None:
+            await self._record_denial(entry(Outcome.DENIED, ReasonCode.NO_ROLE))
+            return NoAccess()
+
+        session_id = new_random_value()
+        session = Session(
+            user_subject=identity.subject,
+            username=identity.username,
+            keycloak_session_id=identity.keycloak_session_id,
+            roles=frozenset({role}),
+            created_at=now,
+            last_seen_at=now,
+            expires_at=now + self._settings.timeouts.absolute_lifetime,
+            tokens=identity.tokens,
+        )
+        async with self._unit_of_work.begin() as transaction:
+            recorder = AuditRecorder(repository=transaction.audit_repository, sink=self._audit_sink)
+            await recorder.record_then_act(
+                entry(Outcome.ALLOWED), lambda: transaction.sessions.add(session_id, session)
+            )
+        return SignedIn(session_id=session_id, return_path=attempt.return_path)
+
+    async def _take(self, attempt_id: str | None) -> SignInAttempt | None:
+        """Remove the attempt in its own transaction, so it is used once whatever follows."""
+        if not attempt_id:
+            return None
+        async with self._unit_of_work.begin() as transaction:
+            return await transaction.sign_in_attempts.take(attempt_id)
+
+    async def _record_denial(self, entry: AuditEntry) -> None:
+        """Store a denial; the user is refused whether or not it could be stored.
+
+        A failed insert is written to stdout by ``record_denial``; the commit
+        of the transaction it aborted then raises, which is swallowed here.
+        """
+        with contextlib.suppress(Exception):
+            async with self._unit_of_work.begin() as transaction:
+                recorder = AuditRecorder(
+                    repository=transaction.audit_repository, sink=self._audit_sink
+                )
+                await recorder.record_denial(entry)
+
+    def _failed(self, reason: ReasonCode, client_ip: str | None) -> SignInFailed:
+        """Count the failure for stdout; without a client IP there is nothing to count it under."""
+        if client_ip is not None:
+            self._failures.record(client_ip, reason)
+        return SignInFailed(reason)

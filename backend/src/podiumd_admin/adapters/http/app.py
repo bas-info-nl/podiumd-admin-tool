@@ -13,26 +13,19 @@ from typing import Final
 
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 
 from podiumd_admin import __version__
 from podiumd_admin.adapters.db.unit_of_work import TransactionAbortedError
 from podiumd_admin.adapters.http import auth, environment, health
 from podiumd_admin.adapters.http.auth import AuthServices
 from podiumd_admin.adapters.http.context import AppContext, ReadinessCheck
+from podiumd_admin.adapters.http.errors import ACTION_NOT_RECORDED, ErrorResponse
 from podiumd_admin.adapters.http.security_headers import SecurityHeadersMiddleware
 from podiumd_admin.application.audit import AuditWriteFailedError
 from podiumd_admin.config import Settings
 
 API_PREFIX: Final = "/api/v1"
 TITLE: Final = "PodiumD Admin Tool"
-ACTION_NOT_RECORDED: Final = "action-not-recorded"
-
-
-class ErrorResponse(BaseModel):
-    """An error the frontend shows in Dutch, chosen by its code."""
-
-    error: str
 
 
 async def _action_not_recorded(_request: Request, _error: Exception) -> JSONResponse:

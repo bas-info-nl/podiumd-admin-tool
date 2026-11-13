@@ -42,6 +42,8 @@ class FakeKeycloak:
     access_token_claims: dict[str, Any] = field(default_factory=dict)
     include_id_token: bool = True
     requests: list[httpx2.Request] = field(default_factory=list)
+    discovery_keys: list[RSAKey] | None = None
+    """The keys the JWKS publishes; by default only ``key``."""
 
     @property
     def transport(self) -> httpx2.MockTransport:
@@ -108,7 +110,8 @@ class FakeKeycloak:
         if path == "/realms/podiumd/.well-known/openid-configuration":
             return httpx2.Response(200, json=self.discovery())
         if path == "/realms/podiumd/protocol/openid-connect/certs":
-            return httpx2.Response(200, json={"keys": [self.key.as_dict(private=False)]})
+            keys = self.discovery_keys if self.discovery_keys is not None else [self.key]
+            return httpx2.Response(200, json={"keys": [key.as_dict(private=False) for key in keys]})
         if path == "/realms/podiumd/protocol/openid-connect/token":
             return self._token(request)
         return httpx2.Response(404)

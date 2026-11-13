@@ -167,6 +167,11 @@ class FakeUnitOfWork:
     transaction, as it does in PostgreSQL, even when the caller swallows the
     error: the commit then rolls back and raises ``FakeTransactionAbortedError``.
     Committed entries go to ``sink`` after the commit.
+
+    ``abort_next_audited_commit`` makes the next commit of a transaction that
+    inserted Audit Entries fail the same way, for a test of issue #30;
+    ``abort_error`` is the error raised, so an HTTP test can use the adapter's
+    own ``TransactionAbortedError``.
     """
 
     sink: FakeAuditSink
@@ -175,6 +180,8 @@ class FakeUnitOfWork:
     sign_in_attempts: FakeSignInAttemptStore = field(default_factory=FakeSignInAttemptStore)
     commits: int = 0
     rollbacks: int = 0
+    abort_next_audited_commit: bool = False
+    abort_error: type[Exception] = field(default_factory=lambda: FakeTransactionAbortedError)
 
     @contextlib.asynccontextmanager
     async def begin(self) -> AsyncIterator[FakeTransaction]:
@@ -201,9 +208,12 @@ class FakeUnitOfWork:
         failed_inserts = (
             self.audit.events.count("insert") - inserts - (len(self.audit.entries) - entries)
         )
-        if failed_inserts:
+        audited = self.audit.events.count("insert") > inserts
+        if failed_inserts or (audited and self.abort_next_audited_commit):
+            if audited:
+                self.abort_next_audited_commit = False
             rollback()
-            raise FakeTransactionAbortedError("a failed insert aborted the transaction")
+            raise self.abort_error("the transaction was aborted and rolled back")
         self.commits += 1
         for entry in self.audit.entries[entries:]:
             self.sink.entry_stored(entry)
