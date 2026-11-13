@@ -183,6 +183,9 @@ jobs:
       - name: Test the PR feedback wait (wait-for-pr-feedback.sh)
         run: .github/scripts/test-wait-for-pr-feedback.sh
 
+      - name: Test the Dockerfile version check (check-dockerfile-versions.sh)
+        run: .github/scripts/test-check-dockerfile-versions.sh
+
       # pre-commit is locked in backend/uv.lock, and the ruff, prettier and
       # eslint hooks use the locked backend and frontend tools.
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
