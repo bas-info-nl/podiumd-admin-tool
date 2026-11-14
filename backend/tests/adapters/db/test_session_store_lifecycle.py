@@ -8,6 +8,7 @@ ones, both without knowing the session identifier: they get an opaque ref.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -157,10 +158,10 @@ async def test_expired_sessions_are_found_idle_or_past_their_lifetime(
 
     async with app_engine.connect() as connection:
         found = await _store(connection).find_expired(
-            last_seen_before=now - timedelta(minutes=30), now=now, limit=10
+            last_seen_until=now - timedelta(minutes=30), now=now, limit=10
         )
         limited = await _store(connection).find_expired(
-            last_seen_before=now - timedelta(minutes=30), now=now, limit=1
+            last_seen_until=now - timedelta(minutes=30), now=now, limit=1
         )
 
     assert sorted(item.session.last_seen_at for item in found) == [
@@ -181,10 +182,107 @@ async def test_an_expired_session_with_unreadable_tokens_is_still_found(
 
     async with app_engine.begin() as connection:
         found = await _store(connection).find_expired(
-            last_seen_before=CREATED_AT + timedelta(hours=1), now=CREATED_AT, limit=10
+            last_seen_until=CREATED_AT + timedelta(hours=1), now=CREATED_AT, limit=10
         )
         removed = await _store(connection).remove_by_ref(found[0].ref)
 
     assert len(found) == 1
     assert found[0].session.tokens is None
     assert removed is True
+
+
+async def test_an_expired_session_is_removed_only_while_it_is_still_expired(
+    app_engine: AsyncEngine,
+) -> None:
+    now = CREATED_AT + timedelta(hours=1)
+    idle_since = now - timedelta(minutes=30)
+    await _add(
+        app_engine,
+        ("idle", _session()),
+        ("idle-exactly", _session(last_seen_at=idle_since)),
+        ("past-lifetime", _session(last_seen_at=now, expires_at=now)),
+        ("active", _session(last_seen_at=now)),
+    )
+
+    async with app_engine.begin() as connection:
+        store = _store(connection)
+        [past_lifetime] = [
+            item
+            for item in await store.find_expired(last_seen_until=idle_since, now=now, limit=10)
+            if item.session.expires_at == now
+        ]
+        removed = (
+            await store.remove_expired("idle", last_seen_until=idle_since, now=now),
+            await store.remove_expired("idle-exactly", last_seen_until=idle_since, now=now),
+            await store.remove_expired_by_ref(
+                past_lifetime.ref, last_seen_until=idle_since, now=now
+            ),
+            await store.remove_expired("active", last_seen_until=idle_since, now=now),
+            await store.remove_expired("", last_seen_until=idle_since, now=now),
+            await store.remove_expired_by_ref("not-hex", last_seen_until=idle_since, now=now),
+        )
+    async with app_engine.connect() as connection:
+        remaining = await _store(connection).get("active")
+
+    assert removed == (True, True, True, False, False, False)
+    assert remaining is not None
+
+
+async def test_a_session_touched_after_the_sweep_found_it_is_not_removed(
+    app_engine: AsyncEngine,
+) -> None:
+    """A request saves its touch between the sweep's read and its removal."""
+    now = CREATED_AT + timedelta(hours=1)
+    idle_since = now - timedelta(minutes=30)
+    await _add(app_engine, ("session-1", _session()))
+
+    async with app_engine.connect() as connection:
+        [stale] = await _store(connection).find_expired(
+            last_seen_until=idle_since, now=now, limit=10
+        )
+    touched = _session(last_seen_at=now)
+    async with app_engine.begin() as connection:
+        assert await _store(connection).save("session-1", touched) is True
+    async with app_engine.begin() as connection:
+        removed = await _store(connection).remove_expired_by_ref(
+            stale.ref, last_seen_until=idle_since, now=now
+        )
+    async with app_engine.connect() as connection:
+        found = await _store(connection).get("session-1")
+
+    assert removed is False
+    assert found == touched
+
+
+async def test_a_removal_waits_for_a_concurrent_touch_and_then_keeps_the_session(
+    app_engine: AsyncEngine,
+) -> None:
+    """The DELETE meets the row while a request is touching it, and re-checks it after."""
+    now = CREATED_AT + timedelta(hours=1)
+    idle_since = now - timedelta(minutes=30)
+    await _add(app_engine, ("session-1", _session()))
+    [stale] = await _find_expired(app_engine, idle_since, now)
+
+    async with app_engine.connect() as touching:
+        await touching.begin()
+        assert await _store(touching).save("session-1", _session(last_seen_at=now)) is True
+
+        async def sweep() -> bool:
+            async with app_engine.begin() as connection:
+                return await _store(connection).remove_expired_by_ref(
+                    stale.ref, last_seen_until=idle_since, now=now
+                )
+
+        removal = asyncio.create_task(sweep())
+        await asyncio.sleep(0.5)
+        assert not removal.done(), "the DELETE should wait for the uncommitted touch"
+        await touching.commit()
+        removed = await asyncio.wait_for(removal, timeout=10)
+
+    assert removed is False
+    assert await _find_expired(app_engine, idle_since, now) == []
+
+
+async def _find_expired(engine: AsyncEngine, idle_since: datetime, now: datetime) -> list[Any]:
+    async with engine.connect() as connection:
+        return await _store(connection).find_expired(last_seen_until=idle_since, now=now, limit=10)

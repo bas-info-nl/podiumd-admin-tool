@@ -18,7 +18,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Row, delete, insert, or_, select, update
+from sqlalchemy import ColumnElement, Row, delete, insert, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from podiumd_admin.adapters.db.session_crypto import (
@@ -39,6 +39,11 @@ def _ref_hash(ref: str) -> bytes | None:
     except ValueError:
         return None
     return id_hash if len(id_hash) == SESSION_ID_HASH_LENGTH else None
+
+
+def _expired(*, last_seen_until: datetime, now: datetime) -> ColumnElement[bool]:
+    """Last seen at or before ``last_seen_until``, or not valid after ``now``."""
+    return or_(sessions.c.last_seen_at <= last_seen_until, sessions.c.expires_at <= now)
 
 
 def _known(session_id: str) -> bool:
@@ -97,9 +102,33 @@ class SqlSessionStore:
         id_hash = _ref_hash(ref)
         return id_hash is not None and await self._delete(id_hash)
 
-    async def _delete(self, id_hash: bytes) -> bool:
+    async def remove_expired(
+        self, session_id: str, *, last_seen_until: datetime, now: datetime
+    ) -> bool:
+        """Delete the row only if it is still expired; ``False`` otherwise."""
+        if not _known(session_id):
+            return False
+        return await self._delete(
+            hash_session_id(session_id), _expired(last_seen_until=last_seen_until, now=now)
+        )
+
+    async def remove_expired_by_ref(
+        self, ref: str, *, last_seen_until: datetime, now: datetime
+    ) -> bool:
+        id_hash = _ref_hash(ref)
+        return id_hash is not None and await self._delete(
+            id_hash, _expired(last_seen_until=last_seen_until, now=now)
+        )
+
+    async def _delete(self, id_hash: bytes, *conditions: ColumnElement[bool]) -> bool:
+        """Delete the row if it matches ``conditions``.
+
+        Under READ COMMITTED a DELETE that meets a row a concurrent
+        transaction is updating waits for it, then checks ``conditions``
+        again against the committed row: a Session touched meanwhile is kept.
+        """
         result = await self._connection.execute(
-            delete(sessions).where(sessions.c.id_hash == id_hash)
+            delete(sessions).where(sessions.c.id_hash == id_hash, *conditions)
         )
         return result.rowcount == 1
 
@@ -110,11 +139,11 @@ class SqlSessionStore:
         return [self._stored(row) for row in result]
 
     async def find_expired(
-        self, *, last_seen_before: datetime, now: datetime, limit: int
+        self, *, last_seen_until: datetime, now: datetime, limit: int
     ) -> list[StoredSession]:
         result = await self._connection.execute(
             select(sessions)
-            .where(or_(sessions.c.last_seen_at < last_seen_before, sessions.c.expires_at <= now))
+            .where(_expired(last_seen_until=last_seen_until, now=now))
             .order_by(sessions.c.last_seen_at)
             .limit(limit)
         )

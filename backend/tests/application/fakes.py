@@ -81,6 +81,11 @@ def _ref(session_id: str) -> str:
     return hashlib.sha256(session_id.encode()).hexdigest()
 
 
+def _expired(session: Session, *, last_seen_until: datetime, now: datetime) -> bool:
+    """The predicate of the adapter's ``find_expired`` and conditional removals."""
+    return session.last_seen_at <= last_seen_until or session.expires_at <= now
+
+
 @dataclass
 class FakeSessionStore:
     """Sessions in a dict keyed by session identifier."""
@@ -111,6 +116,24 @@ class FakeSessionStore:
                 return True
         return False
 
+    async def remove_expired(
+        self, session_id: str, *, last_seen_until: datetime, now: datetime
+    ) -> bool:
+        session = self.sessions.get(session_id)
+        if session is None or not _expired(session, last_seen_until=last_seen_until, now=now):
+            return False
+        return await self.remove(session_id)
+
+    async def remove_expired_by_ref(
+        self, ref: str, *, last_seen_until: datetime, now: datetime
+    ) -> bool:
+        for session_id in list(self.sessions):
+            if _ref(session_id) == ref:
+                return await self.remove_expired(
+                    session_id, last_seen_until=last_seen_until, now=now
+                )
+        return False
+
     async def find_by_keycloak_session_id(self, keycloak_session_id: str) -> list[StoredSession]:
         return [
             StoredSession(ref=_ref(session_id), session=session)
@@ -119,12 +142,12 @@ class FakeSessionStore:
         ]
 
     async def find_expired(
-        self, *, last_seen_before: datetime, now: datetime, limit: int
+        self, *, last_seen_until: datetime, now: datetime, limit: int
     ) -> list[StoredSession]:
         found = [
             StoredSession(ref=_ref(session_id), session=session)
             for session_id, session in self.sessions.items()
-            if session.last_seen_at < last_seen_before or session.expires_at <= now
+            if _expired(session, last_seen_until=last_seen_until, now=now)
         ]
         return found[:limit]
 

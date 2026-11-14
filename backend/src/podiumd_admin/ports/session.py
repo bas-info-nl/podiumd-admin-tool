@@ -7,6 +7,10 @@ keeps the tokens encrypted; both are adapter concerns behind this port.
 Back-channel logout and the expiry sweep find sessions without knowing their
 identifier. They get a ``StoredSession`` with an opaque ``ref``, which
 identifies the stored session but cannot be presented as a session identifier.
+
+Ending a Session because it expired uses the conditional removals: the expiry
+is checked again in the same step that removes the Session, so a request that
+touched it after it was read keeps it.
 """
 
 from __future__ import annotations
@@ -49,15 +53,34 @@ class SessionStore(Protocol):
         """Remove the Session ``ref`` points to; ``False`` if it was not stored."""
         ...
 
+    async def remove_expired(
+        self, session_id: str, *, last_seen_until: datetime, now: datetime
+    ) -> bool:
+        """Remove the Session only if it is still expired; ``True`` if this call removed it.
+
+        Expired means as in ``find_expired``. The check and the removal are
+        one step, so a Session touched by a concurrent request is kept.
+        """
+        ...
+
+    async def remove_expired_by_ref(
+        self, ref: str, *, last_seen_until: datetime, now: datetime
+    ) -> bool:
+        """Like ``remove_expired``, for the Session ``ref`` points to."""
+        ...
+
     async def find_by_keycloak_session_id(self, keycloak_session_id: str) -> list[StoredSession]:
         """The Sessions created in the Keycloak session ``keycloak_session_id`` (``sid``)."""
         ...
 
     async def find_expired(
-        self, *, last_seen_before: datetime, now: datetime, limit: int
+        self, *, last_seen_until: datetime, now: datetime, limit: int
     ) -> list[StoredSession]:
-        """At most ``limit`` Sessions idle since before ``last_seen_before`` or past ``now``.
+        """At most ``limit`` expired Sessions: idle or past their lifetime.
 
-        A Session is past ``now`` when its ``expires_at`` is not after ``now``.
+        A Session is idle when it was last seen at or before
+        ``last_seen_until`` (now minus the idle timeout), and past its
+        lifetime when its ``expires_at`` is not after ``now``, as in the
+        domain's ``expiry_reason``.
         """
         ...

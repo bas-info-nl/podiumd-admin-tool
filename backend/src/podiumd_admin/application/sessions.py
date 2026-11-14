@@ -11,9 +11,11 @@ access-control, "Roles". Design D2 and D4:
   Audit Entry with the reason. Removing the Session (which purges its
   tokens) and inserting that entry happen in one transaction, and the entry
   is only inserted if this call removed the Session, so two requests (or a
-  request and the sweep) can never both record the same expiry. If the entry
-  cannot be stored, the transaction rolls back and the Session stays, so the
-  expiry sweep records it later;
+  request and the sweep) can never both record the same expiry. A Session
+  that ends because it expired is only removed while it is still expired, so
+  a request that touched it after it was read keeps it, and no entry is
+  recorded for it. If the entry cannot be stored, the transaction rolls back
+  and the Session stays, so the expiry sweep records it later;
 - the expiry sweep (``expire_abandoned``) finds Sessions whose user never
   returned, ends them the same way, without a client IP, and purges expired
   sign-in attempts. The app runs it every minute, in its single replica
@@ -26,6 +28,7 @@ import contextlib
 import dataclasses
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Final
 
 from podiumd_admin.application.audit import AuditRecorder
@@ -49,6 +52,7 @@ from podiumd_admin.ports.identity_provider import (
     InvalidLogoutTokenError,
     RefreshRefusedError,
 )
+from podiumd_admin.ports.session import SessionStore
 from podiumd_admin.ports.unit_of_work import UnitOfWork
 
 SESSION_EXPIRED_ACTION: Final = "session-expired"
@@ -72,11 +76,17 @@ class ActiveSession:
 
 @dataclass(frozen=True, slots=True)
 class _Ending:
-    """Which stored Session to end: by its identifier or by the store's ref."""
+    """Which stored Session to end: by its identifier or by the store's ref.
+
+    ``expired_at`` is set when the Session ends because it expired at that
+    moment: it is then only removed if it is still expired, so a Session that
+    a concurrent request touched after it was read is kept.
+    """
 
     session: Session
     session_id: str | None = None
     ref: str | None = None
+    expired_at: datetime | None = None
 
 
 class Sessions:
@@ -116,7 +126,10 @@ class Sessions:
         reason = expiry_reason(session, now, self._settings.timeouts)
         if reason is not None:
             await self._end_quietly(
-                _Ending(session=session, session_id=session_id), reason, client_ip, correlation_id
+                _Ending(session=session, session_id=session_id, expired_at=now),
+                reason,
+                client_ip,
+                correlation_id,
             )
             return None
 
@@ -221,12 +234,12 @@ class Sessions:
         while True:
             async with self._unit_of_work.begin() as transaction:
                 found = await transaction.sessions.find_expired(
-                    last_seen_before=idle_since, now=now, limit=SWEEP_BATCH_SIZE
+                    last_seen_until=idle_since, now=now, limit=SWEEP_BATCH_SIZE
                 )
             ended_in_batch = 0
             for stored in found:
                 reason = expiry_reason(stored.session, now, self._settings.timeouts)
-                ending = _Ending(session=stored.session, ref=stored.ref)
+                ending = _Ending(session=stored.session, ref=stored.ref, expired_at=now)
                 with contextlib.suppress(Exception):
                     if await self._end(ending, reason or ReasonCode.IDLE, None, correlation_id):
                         ended_in_batch += 1
@@ -298,12 +311,7 @@ class Sessions:
             client_ip=client_ip,
         )
         async with self._unit_of_work.begin() as transaction:
-            if ending.session_id is not None:
-                removed = await transaction.sessions.remove(ending.session_id)
-            elif ending.ref is not None:
-                removed = await transaction.sessions.remove_by_ref(ending.ref)
-            else:  # pragma: no cover - every _Ending names one of the two
-                raise ValueError("an ending needs a session id or a ref")
+            removed = await self._remove(transaction.sessions, ending)
             if removed:
                 try:
                     await transaction.audit_repository.add(entry)
@@ -312,6 +320,25 @@ class Sessions:
                         self._audit_sink.audit_write_failed(entry, error)
                     raise
         return removed
+
+    async def _remove(self, store: SessionStore, ending: _Ending) -> bool:
+        """Remove the Session ``ending`` names; only while still expired if it expired."""
+        if ending.expired_at is None:
+            if ending.session_id is not None:
+                return await store.remove(ending.session_id)
+            if ending.ref is not None:
+                return await store.remove_by_ref(ending.ref)
+        else:
+            idle_since = ending.expired_at - self._settings.timeouts.idle_timeout
+            if ending.session_id is not None:
+                return await store.remove_expired(
+                    ending.session_id, last_seen_until=idle_since, now=ending.expired_at
+                )
+            if ending.ref is not None:
+                return await store.remove_expired_by_ref(
+                    ending.ref, last_seen_until=idle_since, now=ending.expired_at
+                )
+        raise ValueError("an ending needs a session id or a ref")  # pragma: no cover
 
     async def _end_quietly(
         self,

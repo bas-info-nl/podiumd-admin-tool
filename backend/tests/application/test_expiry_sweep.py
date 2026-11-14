@@ -9,6 +9,7 @@ purges the tokens. It also purges expired sign-in attempts.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import timedelta
 from typing import Any
 
@@ -20,6 +21,7 @@ from podiumd_admin.domain.audit import Outcome, ReasonCode
 from podiumd_admin.domain.roles import Role
 from podiumd_admin.domain.session import Session
 from podiumd_admin.domain.sign_in import SIGN_IN_ATTEMPT_LIFETIME, SignInAttempt
+from podiumd_admin.ports.session import StoredSession
 from tests.application.conftest import AUTH_SETTINGS, NOW
 from tests.application.fakes import (
     FakeAuditSink,
@@ -110,6 +112,27 @@ async def test_active_sessions_are_left_alone(
 
     assert await sessions.expire_abandoned() == 0
     assert "active" in unit_of_work.sessions.sessions
+    assert unit_of_work.audit.entries == []
+
+
+async def test_a_session_touched_after_it_was_found_is_not_ended(
+    sessions: Sessions, unit_of_work: FakeUnitOfWork, clock: FakeClock
+) -> None:
+    """A request touches the Session between the sweep's read and its removal."""
+    unit_of_work.sessions.sessions["touched"] = _session()
+    clock.advance(AUTH_SETTINGS.timeouts.idle_timeout + timedelta(seconds=1))
+    original_find_expired = unit_of_work.sessions.find_expired
+
+    async def find_then_touch(**kwargs: Any) -> list[StoredSession]:
+        found = await original_find_expired(**kwargs)
+        stale = unit_of_work.sessions.sessions["touched"]
+        unit_of_work.sessions.sessions["touched"] = replace(stale, last_seen_at=clock.now())
+        return found
+
+    unit_of_work.sessions.find_expired = find_then_touch  # type: ignore[method-assign]
+
+    assert await sessions.expire_abandoned() == 0
+    assert unit_of_work.sessions.sessions["touched"].last_seen_at == clock.now()
     assert unit_of_work.audit.entries == []
 
 

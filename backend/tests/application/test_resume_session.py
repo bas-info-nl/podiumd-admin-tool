@@ -14,6 +14,7 @@ Spec: authentication, "Session lifetime and expiry"; access-control, "Roles"
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import timedelta
 from typing import Any
 
@@ -186,6 +187,28 @@ async def test_an_expired_session_whose_entry_cannot_be_stored_is_kept_for_the_s
     assert SESSION_ID in unit_of_work.sessions.sessions
     [(entry, _error)] = sink.write_failures
     assert entry.reason is ReasonCode.IDLE
+
+
+async def test_an_idle_session_touched_by_an_overlapping_request_is_not_ended(
+    sessions: Sessions, unit_of_work: FakeUnitOfWork, clock: FakeClock
+) -> None:
+    """Another request read the Session in time and saves its touch after this read."""
+    unit_of_work.sessions.sessions[SESSION_ID] = _session()
+    clock.advance(AUTH_SETTINGS.timeouts.idle_timeout)
+    original_get = unit_of_work.sessions.get
+
+    async def get_then_touch(session_id: str) -> Session | None:
+        stale = await original_get(session_id)
+        if stale is not None:
+            unit_of_work.sessions.sessions[session_id] = replace(stale, last_seen_at=clock.now())
+        return stale
+
+    unit_of_work.sessions.get = get_then_touch  # type: ignore[method-assign]
+
+    assert await _resume(sessions) is None
+
+    assert unit_of_work.sessions.sessions[SESSION_ID].last_seen_at == clock.now()
+    assert unit_of_work.audit.entries == []
 
 
 # --- Refresh -------------------------------------------------------------------------------
