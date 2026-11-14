@@ -134,6 +134,13 @@ check "quote in frontend path: frontend, image and javascript-typescript" \
   'backend=false frontend=true image=true codeql-python=false codeql-javascript-typescript=true' \
   "$(run_script "${repo}" -- "${head}^" "${head}")"
 
+# The backend integration tests import the shared Keycloak realm from dev/.
+repo=$(new_repo)
+head=$(commit_change "${repo}" 'mkdir -p dev/keycloak && echo x >dev/keycloak/podiumd-admin-realm.json')
+check "Keycloak realm change: backend only" \
+  'backend=true frontend=false codeql-python=false codeql-javascript-typescript=false' \
+  "$(run_script "${repo}" -- "${head}^" "${head}")"
+
 repo=$(new_repo)
 head=$(commit_change "${repo}" "echo x >'backend/back\\slash.py'")
 check "backslash in backend path: backend, image and python" \

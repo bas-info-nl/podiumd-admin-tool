@@ -25,8 +25,10 @@ areas=(backend frontend image codeql-python codeql-javascript-typescript)
 shared='^\.github/scripts/changed-areas\.sh$'
 
 # Extended regexes per area; a changed path that matches turns the area on.
-# backend: the backend project, plus the root .gitignore that ruff respects.
-backend_re="^backend/|^\.github/workflows/ci\.yml$|^\.gitignore$|${shared}"
+# backend: the backend project, the shared Keycloak realm in dev/keycloak/ that
+# the backend integration tests import, and the root .gitignore that ruff
+# respects.
+backend_re="^backend/|^dev/keycloak/|^\.github/workflows/ci\.yml$|^\.gitignore$|${shared}"
 # frontend: the frontend job also checks the e2e scaffold, reads .nvmrc and
 # runs prettier with the root config, ignore files and .editorconfig.
 frontend_re="^frontend/|^e2e/|^\.github/workflows/ci\.yml$|^\.nvmrc$|^\.prettierrc\.json$|^\.prettierignore$|^\.gitignore$|^\.editorconfig$|${shared}"
