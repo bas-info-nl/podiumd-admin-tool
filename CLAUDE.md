@@ -107,6 +107,7 @@ These apply to the backend-developer, frontend-developer and platform-engineer a
 ```sh
 .github/scripts/check.sh backend    # uv sync, ruff, format, mypy, import-linter, pytest + coverage gate, pip-audit
 .github/scripts/check.sh frontend   # frontend/: npm ci, eslint, prettier, tsc, vitest, npm audit; then the e2e/ scaffold
+.github/scripts/check.sh image      # hadolint, Dockerfile version check, docker build, smoke test (read-only rootfs, /healthz, proxy headers off), Trivy; needs Docker
 .github/scripts/check.sh hooks      # the script tests, the agent setup tests and pre-commit on all files (its fixer hooks rewrite files)
 .github/scripts/check.sh hygiene    # hooks, plus gitleaks over the full history
 .github/scripts/check.sh all
@@ -123,6 +124,8 @@ The hooks use the pre-commit version locked in `backend/uv.lock`; install them w
 - Python: `backend/.python-version`;
 - Node: `.nvmrc`;
 - pre-commit: `backend/uv.lock`;
-- hook tools (gitleaks, actionlint, zizmor, hadolint, shellcheck): `.pre-commit-config.yaml`.
+- hook tools (gitleaks, actionlint, zizmor, hadolint, shellcheck): `.pre-commit-config.yaml`;
+- image base versions: `.nvmrc` and `backend/.python-version`, passed as `docker build` args (the `Dockerfile` holds only digests, never a version);
+- Trivy: the `FROM` in `.github/tools/trivy/Dockerfile`.
 
 Never hard-code a tool version in a workflow or a doc command.

@@ -36,8 +36,8 @@ You are the **code reviewer** of the PodiumD Admin Tool team: task-manager, back
    Never use `git stash`, and never edit files in the developer's worktree. A test that can't fail proves nothing.
 
    **Review depth.** Your prompt names one of two depths:
-   - **FULL:** the first review of a work package. Run `.github/scripts/check.sh all`: the backend and frontend gates from a clean install, the path-gate tests, the hooks, and gitleaks over the full history.
-   - **INCREMENTAL since `<ref>`:** a re-review after fixes, or a review of fixes on a branch that was already reviewed and pushed. Run `.github/scripts/check.sh --changed <ref> HEAD`: the hooks, plus only the area gates that `changed-areas.sh` says the commits after `<ref>` touch. It fails open, so when it cannot tell it runs every area. Uncommitted work is not in that range: also run the gate of each area it touches (`check.sh backend` or `check.sh frontend`). CI still runs every gate on the pushed branch.
+   - **FULL:** the first review of a work package. Run `.github/scripts/check.sh all`: the backend, frontend and image gates from a clean install, the path-gate tests, the hooks, and gitleaks over the full history.
+   - **INCREMENTAL since `<ref>`:** a re-review after fixes, or a review of fixes on a branch that was already reviewed and pushed. Run `.github/scripts/check.sh --changed <ref> HEAD`: the hooks, plus only the area gates that `changed-areas.sh` says the commits after `<ref>` touch. It fails open, so when it cannot tell it runs every area. Uncommitted work is not in that range: also run the gate of each area it touches (`check.sh backend`, `check.sh frontend` or `check.sh image`). CI still runs every gate on the pushed branch.
 
    At either depth, re-run every check that failed in the previous round and show that it passes now.
 2. **Check scope and correctness** against:

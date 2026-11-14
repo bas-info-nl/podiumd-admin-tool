@@ -22,7 +22,7 @@ First follow the **Developer rules** in `CLAUDE.md`. They cover scope, test-firs
 - **Not yours:** backend and frontend source code. If a platform change needs one, say so in your report.
 
 ## Hard rules
-- **Required checks:** `main` requires `backend`, `frontend`, `hygiene`, `CodeQL (python)` and `CodeQL (javascript-typescript)`.
+- **Required checks:** `main` requires `backend`, `frontend`, `image`, `hygiene`, `CodeQL (python)` and `CodeQL (javascript-typescript)` (`image` once it is added to the `protect-main` ruleset after the container-image PR).
   - Never rename or remove them.
   - Never gate a workflow with `on.paths`; use the existing `changes` job and `.github/scripts/changed-areas.sh`.
   - Every new job that becomes required must always report.
@@ -40,7 +40,8 @@ First follow the **Developer rules** in `CLAUDE.md`. They cover scope, test-firs
 - **Runtime hardening (ADR 0007):** non-root, read-only root filesystem, no privilege escalation, all capabilities dropped, and `/tmp` as an emptyDir.
 
 ## Your checks
-- `.github/scripts/check.sh hooks`. This runs the script tests (`test-changed-areas.sh`, `test-wait-for-pr-feedback.sh`), the agent setup tests (`.claude/tests/`) and `pre-commit run --all-files`, which covers actionlint, zizmor, shellcheck, hadolint, gitleaks and node-engines.
+- `.github/scripts/check.sh hooks`. This runs the script tests (`test-changed-areas.sh`, `test-wait-for-pr-feedback.sh`, `test-check-dockerfile-versions.sh`), the agent setup tests (`.claude/tests/`) and `pre-commit run --all-files`, which covers actionlint, zizmor, shellcheck, hadolint, gitleaks and node-engines.
+- `.github/scripts/check.sh image` for the Dockerfile, the image scripts or the Trivy pin (needs Docker).
 - zizmor audits every workflow, `dependabot.yml` and the pre-commit config. Fix what it reports; suppress a finding only with an inline `# zizmor: ignore[<audit>]` comment that says why.
 - `scorecard.yml` must stay within what Scorecard accepts for published results: no workflow-level write permissions, `env` or `defaults`, and only the actions it already uses, without `run:` steps.
 - When you change a check command, change it in `.github/scripts/check.sh` and in `ci.yml` together.

@@ -128,6 +128,6 @@ Push the approved fix commits on the feature branch and, when the prompt says so
 
 ## Rules
 
-- `main` is protected: PRs only, with required checks `backend`, `frontend`, `hygiene`, `CodeQL (python)` and `CodeQL (javascript-typescript)`.
+- `main` is protected: PRs only, with required checks `backend`, `frontend`, `image` (once added to the ruleset), `hygiene`, `CodeQL (python)` and `CodeQL (javascript-typescript)`.
 - Commit messages end with the `Co-Authored-By` trailer described under "Commits" in `CLAUDE.md`.
 - Report honestly. Never hide a failing check or an unresolved finding.
