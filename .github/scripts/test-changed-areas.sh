@@ -10,8 +10,8 @@ work=$(mktemp -d)
 trap 'rm -rf "${work}"' EXIT
 
 failures=0
-all_true='backend=true frontend=true codeql-python=true codeql-javascript-typescript=true'
-all_false='backend=false frontend=false codeql-python=false codeql-javascript-typescript=false'
+all_true='backend=true frontend=true image=true codeql-python=true codeql-javascript-typescript=true'
+all_false='backend=false frontend=false image=false codeql-python=false codeql-javascript-typescript=false'
 
 git_() {
   git -c user.name=test -c user.email=test@example.invalid -c commit.gpgsign=false "$@"
@@ -73,38 +73,77 @@ check "docs only: nothing runs" "${all_false}" \
 
 repo=$(new_repo)
 head=$(commit_change "${repo}" 'echo x >backend/app.py')
-check "backend change: backend and python" \
-  'backend=true frontend=false codeql-python=true codeql-javascript-typescript=false' \
+check "backend change: backend, image and python" \
+  'backend=true frontend=false image=true codeql-python=true codeql-javascript-typescript=false' \
   "$(run_script "${repo}" -- "${head}^" "${head}")"
 
 repo=$(new_repo)
 head=$(commit_change "${repo}" 'echo x >frontend/app.ts')
-check "frontend change: frontend and javascript-typescript" \
-  'backend=false frontend=true codeql-python=false codeql-javascript-typescript=true' \
+check "frontend change: frontend, image and javascript-typescript" \
+  'backend=false frontend=true image=true codeql-python=false codeql-javascript-typescript=true' \
   "$(run_script "${repo}" -- "${head}^" "${head}")"
 
 repo=$(new_repo)
-head=$(commit_change "${repo}" 'echo x >backend/é.py')
-check "non-ASCII backend path: backend and python" \
-  'backend=true frontend=false codeql-python=true codeql-javascript-typescript=false' \
+head=$(commit_change "${repo}" 'echo x >Dockerfile')
+check "Dockerfile change: only image" \
+  'backend=false frontend=false image=true codeql-python=false codeql-javascript-typescript=false' \
+  "$(run_script "${repo}" -- "${head}^" "${head}")"
+
+repo=$(new_repo)
+head=$(commit_change "${repo}" 'echo x >.dockerignore')
+check ".dockerignore change: only image" \
+  'backend=false frontend=false image=true codeql-python=false codeql-javascript-typescript=false' \
+  "$(run_script "${repo}" -- "${head}^" "${head}")"
+
+repo=$(new_repo)
+head=$(commit_change "${repo}" 'echo x >.nvmrc')
+check ".nvmrc change: frontend and image" \
+  'backend=false frontend=true image=true codeql-python=false codeql-javascript-typescript=false' \
+  "$(run_script "${repo}" -- "${head}^" "${head}")"
+
+repo=$(new_repo)
+head=$(commit_change "${repo}" 'echo x >backend/.python-version')
+check "backend/.python-version change: backend, image and python" \
+  'backend=true frontend=false image=true codeql-python=true codeql-javascript-typescript=false' \
+  "$(run_script "${repo}" -- "${head}^" "${head}")"
+
+for file in .github/tools/trivy/Dockerfile .github/scripts/image-smoke-test.sh \
+  .github/scripts/image-scan.sh .github/scripts/check-dockerfile-versions.sh; do
+  repo=$(new_repo)
+  head=$(commit_change "${repo}" "mkdir -p \"\$(dirname '${file}')\" && echo x >'${file}'")
+  check "${file} change: only image" \
+    'backend=false frontend=false image=true codeql-python=false codeql-javascript-typescript=false' \
+    "$(run_script "${repo}" -- "${head}^" "${head}")"
+done
+
+repo=$(new_repo)
+head=$(commit_change "${repo}" 'mkdir -p .github/workflows && echo x >.github/workflows/ci.yml')
+check "ci.yml change: backend, frontend and image" \
+  'backend=true frontend=true image=true codeql-python=false codeql-javascript-typescript=false' \
+  "$(run_script "${repo}" -- "${head}^" "${head}")"
+
+repo=$(new_repo)
+head=$(commit_change "${repo}" "echo x >'backend/é.py'")
+check "non-ASCII backend path: backend, image and python" \
+  'backend=true frontend=false image=true codeql-python=true codeql-javascript-typescript=false' \
   "$(run_script "${repo}" -- "${head}^" "${head}")"
 
 repo=$(new_repo)
 head=$(commit_change "${repo}" "echo x >'frontend/we\"ird.ts'")
-check "quote in frontend path: frontend and javascript-typescript" \
-  'backend=false frontend=true codeql-python=false codeql-javascript-typescript=true' \
+check "quote in frontend path: frontend, image and javascript-typescript" \
+  'backend=false frontend=true image=true codeql-python=false codeql-javascript-typescript=true' \
   "$(run_script "${repo}" -- "${head}^" "${head}")"
 
 repo=$(new_repo)
 head=$(commit_change "${repo}" "echo x >'backend/back\\slash.py'")
-check "backslash in backend path: backend and python" \
-  'backend=true frontend=false codeql-python=true codeql-javascript-typescript=false' \
+check "backslash in backend path: backend, image and python" \
+  'backend=true frontend=false image=true codeql-python=true codeql-javascript-typescript=false' \
   "$(run_script "${repo}" -- "${head}^" "${head}")"
 
 repo=$(new_repo)
 head=$(commit_change "${repo}" 'git mv backend/app.py docs/app.txt')
-check "rename out of backend: backend and python" \
-  'backend=true frontend=false codeql-python=true codeql-javascript-typescript=false' \
+check "rename out of backend: backend, image and python" \
+  'backend=true frontend=false image=true codeql-python=true codeql-javascript-typescript=false' \
   "$(run_script "${repo}" -- "${head}^" "${head}")"
 
 repo=$(new_repo)
@@ -128,7 +167,7 @@ git_ -C "${repo}" switch -q main
 commit_change "${repo}" 'echo x >backend/app.py' >/dev/null
 git_ -C "${repo}" merge -q --no-ff --no-edit pr
 check "pull_request merge commit: only the PR's changes count" \
-  'backend=false frontend=true codeql-python=false codeql-javascript-typescript=true' \
+  'backend=false frontend=true image=true codeql-python=false codeql-javascript-typescript=true' \
   "$(run_script "${repo}" GITHUB_EVENT_NAME=pull_request --)"
 
 repo=$(new_repo)

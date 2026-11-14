@@ -8,7 +8,7 @@
 #
 # Prints one `area=true|false` line per area, and appends the same lines to
 # $GITHUB_OUTPUT when it is set. Areas:
-#   backend, frontend                         -> the ci.yml jobs
+#   backend, frontend, image                  -> the ci.yml jobs
 #   codeql-python, codeql-javascript-typescript -> the codeql.yml matrix legs
 #
 # Only pull requests are gated. Every other event (push to main, schedule,
@@ -19,7 +19,7 @@
 # resolved, every area runs: the gate fails open, never closed.
 set -euo pipefail
 
-areas=(backend frontend codeql-python codeql-javascript-typescript)
+areas=(backend frontend image codeql-python codeql-javascript-typescript)
 
 # Files that change what every gated job does.
 shared='^\.github/scripts/changed-areas\.sh$'
@@ -30,6 +30,10 @@ backend_re="^backend/|^\.github/workflows/ci\.yml$|^\.gitignore$|${shared}"
 # frontend: the frontend job also checks the e2e scaffold, reads .nvmrc and
 # runs prettier with the root config, ignore files and .editorconfig.
 frontend_re="^frontend/|^e2e/|^\.github/workflows/ci\.yml$|^\.nvmrc$|^\.prettierrc\.json$|^\.prettierignore$|^\.gitignore$|^\.editorconfig$|${shared}"
+# image: the Dockerfile builds the frontend and the backend, takes its Node
+# and Python versions from .nvmrc and backend/.python-version, and the job runs
+# the Dockerfile version check, the smoke test and the Trivy scan.
+image_re="^backend/|^frontend/|^Dockerfile$|^\.dockerignore$|^\.nvmrc$|^\.github/tools/trivy/|^\.github/scripts/(check-dockerfile-versions|image-smoke-test|image-scan)\.sh$|^\.github/workflows/ci\.yml$|${shared}"
 # CodeQL analyses every file of its language in the repository, not only one
 # directory, so any source file of that language turns its leg on.
 codeql_python_re="^backend/|\.pyi?$|^\.github/workflows/codeql\.yml$|${shared}"
@@ -120,5 +124,6 @@ matches() {
 emit \
   "backend=$(matches "$backend_re")" \
   "frontend=$(matches "$frontend_re")" \
+  "image=$(matches "$image_re")" \
   "codeql-python=$(matches "$codeql_python_re")" \
   "codeql-javascript-typescript=$(matches "$codeql_js_re")"

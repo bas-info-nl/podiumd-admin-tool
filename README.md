@@ -22,12 +22,13 @@ and keeps an append-only Audit Log of every attempted action.
 
 ## Repository layout
 
-| Path        | Contents                                                     |
-| ----------- | ------------------------------------------------------------ |
-| `backend/`  | Python 3.12 FastAPI backend, hexagonal layout, managed by uv |
-| `frontend/` | React + TypeScript + Vite UI, NL Design System, Dutch UI     |
-| `e2e/`      | Playwright BDD end-to-end tests                              |
-| `docs/`     | ADRs, development requirements and research                  |
+| Path         | Contents                                                     |
+| ------------ | ------------------------------------------------------------ |
+| `backend/`   | Python 3.12 FastAPI backend, hexagonal layout, managed by uv |
+| `frontend/`  | React + TypeScript + Vite UI, NL Design System, Dutch UI     |
+| `e2e/`       | Playwright BDD end-to-end tests                              |
+| `docs/`      | ADRs, development requirements and research                  |
+| `Dockerfile` | The one container image: built frontend plus backend         |
 
 ## Development
 
@@ -59,14 +60,17 @@ local development read that same file. Versions are exact (patch level), so
 "works on my machine" and CI run the same tools. Do not repeat a version in a
 workflow or a doc; change the file in the table instead.
 
-| Tool                                               | Single source                                            | Read by CI                                     | Locally                                                                                             |
-| -------------------------------------------------- | -------------------------------------------------------- | ---------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| uv                                                 | `[tool.uv] required-version` in `backend/pyproject.toml` | `setup-uv` `version-file`                      | uv refuses to run the project with another version; `uv self update <version>` or `brew upgrade uv` |
-| Python                                             | `backend/.python-version`                                | uv (`uv sync` in `backend/`)                   | uv installs and uses it automatically (`uv python install` in `backend/`)                           |
-| Node.js (and its bundled npm)                      | `.nvmrc`                                                 | `setup-node` `node-version-file`               | `nvm install` / `nvm use` (or fnm); npm warns (`EBADENGINE`) on another version                     |
-| pre-commit                                         | `backend/uv.lock` (backend dev dependency)               | `uv run --project backend --locked pre-commit` | `uv run --project backend --locked pre-commit ...`                                                  |
-| gitleaks, actionlint, zizmor, hadolint, shellcheck | hook `rev` in `.pre-commit-config.yaml`                  | through pre-commit                             | through pre-commit                                                                                  |
-| ruff, mypy, eslint, prettier, ...                  | `backend/uv.lock`, `frontend/package-lock.json`          | `uv sync --locked`, `npm ci`                   | `uv sync`, `npm ci`                                                                                 |
+| Tool                                               | Single source                                                         | Read by CI                                        | Locally                                                                                             |
+| -------------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| uv                                                 | `[tool.uv] required-version` in `backend/pyproject.toml`              | `setup-uv` `version-file`                         | uv refuses to run the project with another version; `uv self update <version>` or `brew upgrade uv` |
+| Python                                             | `backend/.python-version`                                             | uv (`uv sync` in `backend/`)                      | uv installs and uses it automatically (`uv python install` in `backend/`)                           |
+| Node.js (and its bundled npm)                      | `.nvmrc`                                                              | `setup-node` `node-version-file`                  | `nvm install` / `nvm use` (or fnm); npm warns (`EBADENGINE`) on another version                     |
+| pre-commit                                         | `backend/uv.lock` (backend dev dependency)                            | `uv run --project backend --locked pre-commit`    | `uv run --project backend --locked pre-commit ...`                                                  |
+| gitleaks, actionlint, zizmor, hadolint, shellcheck | hook `rev` in `.pre-commit-config.yaml`                               | through pre-commit                                | through pre-commit                                                                                  |
+| ruff, mypy, eslint, prettier, ...                  | `backend/uv.lock`, `frontend/package-lock.json`                       | `uv sync --locked`, `npm ci`                      | `uv sync`, `npm ci`                                                                                 |
+| Node.js and Python base images                     | `.nvmrc`, `backend/.python-version` (version); digest in `Dockerfile` | `docker build --build-arg` from the version files | the same `docker build` command (see "Container image")                                             |
+| uv in the image                                    | `required-version` (version); digest in `Dockerfile`                  | uv refuses another version, failing the build     | the same                                                                                            |
+| Trivy                                              | `FROM` in `.github/tools/trivy/Dockerfile`                            | `.github/scripts/image-scan.sh`                   | `.github/scripts/image-scan.sh`                                                                     |
 
 The uv pin is exact and Dependabot does not bump it: when Dependabot reports a
 uv version mismatch, bump `required-version` by hand in a PR ([#22](https://github.com/infonl/podiumd-admin-tool/issues/22)).
@@ -86,6 +90,15 @@ The Python language level comes from `requires-python` in
 `backend/pyproject.toml`: ruff infers its target from it, and mypy checks
 against the interpreter, which is the one in `backend/.python-version`. uv
 rejects a `.python-version` outside `requires-python`.
+
+The `Dockerfile` never names a version (`check-dockerfile-versions.sh`, a
+pre-commit hook, fails if it does). It pins the base images and the uv image
+by digest, and the digest decides which image is used, so the build checks
+that the image's Node.js, Python and uv match the version files. After a Node.js,
+Python or uv bump, update the matching digest in the `Dockerfile` too, with
+`docker buildx imagetools inspect <image>:<tag>`; the build fails until you
+do. Dependabot cannot update these digests (it cannot resolve the build-arg
+tags); it does update the Trivy image.
 
 After a version bump, update locally with `uv self update <version>` (or
 `brew upgrade uv`), `nvm install` in the repository root, and `uv sync` and
@@ -114,6 +127,29 @@ PODIUMD_ADMIN_DATABASE_OWNER_URL=postgresql+psycopg://podiumd_admin_owner:...@lo
 uv run alembic upgrade head --sql
 ```
 
+### Container image
+
+One image holds the built frontend and the backend (design D7, ADR 0008). It
+runs as uid 1000 with a read-only root filesystem; `/tmp` is the only path
+that must be writable. Build it from the repository root; the Node.js and
+Python versions come from their version files:
+
+```sh
+docker build \
+  --build-arg NODE_BASE_VERSION="$(cat .nvmrc)" \
+  --build-arg PYTHON_BASE_VERSION="$(cat backend/.python-version)" \
+  --tag podiumd-admin:local .
+```
+
+The container listens on port 8000 and starts
+`uvicorn --factory --no-proxy-headers podiumd_admin.main:create_app_from_environment`.
+It needs the `PODIUMD_ADMIN_*` settings (`backend/src/podiumd_admin/config.py`);
+`.github/scripts/image-smoke-test.sh` shows a minimal set. Check an image the
+way CI does with `.github/scripts/check.sh image`: hadolint, the Dockerfile
+version check, the build, the smoke test (read-only root filesystem,
+`/healthz`, uid 1000, proxy headers off) and the Trivy scan, which fails on
+HIGH or CRITICAL vulnerabilities that have a fix.
+
 ### Pre-commit hooks
 
 The hooks in [.pre-commit-config.yaml](.pre-commit-config.yaml) run ruff,
@@ -138,11 +174,12 @@ green `hygiene` job. The full-history gitleaks scan that CI also runs is
 CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs these checks on
 pull requests and on `main`; run them locally before you push.
 
-| Area     | Commands                                                                                                                                                                            |
-| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Backend  | `uv run ruff check .`, `uv run ruff format --check .`, `uv run mypy`, `uv run lint-imports`, `uv run pytest`, coverage gate, pip-audit                                              |
-| Frontend | `npm run lint`, `npm run format:check`, `npm run typecheck`, `npm run test:coverage`, `npm audit`                                                                                   |
-| Hygiene  | `uv run --project backend --locked pre-commit run --all-files`, gitleaks over the full history, actionlint, hadolint, the path gate tests, the agent setup tests (`.claude/tests/`) |
+| Area     | Commands                                                                                                                                                                                                                |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Backend  | `uv run ruff check .`, `uv run ruff format --check .`, `uv run mypy`, `uv run lint-imports`, `uv run pytest`, coverage gate, pip-audit                                                                                  |
+| Frontend | `npm run lint`, `npm run format:check`, `npm run typecheck`, `npm run test:coverage`, `npm audit`                                                                                                                       |
+| Image    | hadolint, `check-dockerfile-versions.sh`, `docker build`, `image-smoke-test.sh`, `image-scan.sh` (Trivy): `.github/scripts/check.sh image`                                                                              |
+| Hygiene  | `uv run --project backend --locked pre-commit run --all-files`, gitleaks over the full history, actionlint, hadolint, the path gate tests, the Dockerfile version check tests, the agent setup tests (`.claude/tests/`) |
 
 CodeQL ([.github/workflows/codeql.yml](.github/workflows/codeql.yml)) analyses
 Python and TypeScript on every pull request, on `main` and weekly. Dependabot
@@ -152,7 +189,7 @@ weekly. All GitHub Actions are pinned to commit SHAs.
 On pull requests the checks are gated by path: a job or CodeQL language only
 runs when the PR touches its area, as decided by
 [.github/scripts/changed-areas.sh](.github/scripts/changed-areas.sh). `hygiene`
-always runs. A gated check still reports, as skipped (`backend`, `frontend`) or
+always runs. A gated check still reports, as skipped (`backend`, `frontend`, `image`) or
 as a quick pass (CodeQL), so the required checks on `main` never wait. Pushes to
 `main`, the weekly CodeQL run and manual runs check everything.
 
@@ -160,6 +197,7 @@ as a quick pass (CodeQL), so the required checks on `main` never wait. Pushes to
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
 | `backend`                      | `backend/`, `.gitignore`, `ci.yml`                                                                                                  |
 | `frontend`                     | `frontend/`, `e2e/`, `.nvmrc`, `.prettierrc.json`, `.prettierignore`, `.editorconfig`, `.gitignore`, `ci.yml`                       |
+| `image`                        | `backend/`, `frontend/`, `Dockerfile`, `.dockerignore`, `.nvmrc`, `.github/tools/trivy/`, the image scripts, `ci.yml`               |
 | CodeQL (python)                | `backend/`, any `*.py` or `*.pyi` file, `codeql.yml`                                                                                |
 | CodeQL (javascript-typescript) | `frontend/`, `e2e/`, any JavaScript, TypeScript or HTML file (CodeQL scans the whole repository, `.claude/` included), `codeql.yml` |
 | `hygiene`                      | always                                                                                                                              |

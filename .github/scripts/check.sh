@@ -9,10 +9,12 @@
 # Areas:
 #   backend    the `backend` job in .github/workflows/ci.yml
 #   frontend   the `frontend` job: frontend/ and the e2e/ scaffold
+#   image      the `image` job: hadolint, the Dockerfile version check, the
+#              build, the smoke test and the Trivy scan (needs Docker)
 #   hooks      the script tests, the agent setup tests (.claude/tests/) and
 #              `pre-commit run --all-files`
 #   hygiene    `hooks` plus gitleaks over the full history (the `hygiene` job)
-#   all        backend, frontend and hygiene
+#   all        backend, frontend, image and hygiene
 #
 # This script is the one list of local check commands: CLAUDE.md and the agent
 # roles in .claude/agents/ point here instead of repeating them. ci.yml runs the
@@ -29,7 +31,7 @@ set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
 
 usage() {
-  echo "usage: $0 AREA... | --changed BASE HEAD   (areas: backend frontend hooks hygiene all)" >&2
+  echo "usage: $0 AREA... | --changed BASE HEAD   (areas: backend frontend image hooks hygiene all)" >&2
   exit 2
 }
 
@@ -71,10 +73,28 @@ check_frontend() (
   step npm audit
 )
 
+check_image() (
+  cd "$root"
+  # A tag of its own per run: worktrees share one Docker daemon, so a fixed tag
+  # could be replaced by a parallel build before the smoke test or the scan,
+  # which would then check the other branch's image. Removed again on exit.
+  local image="podiumd-admin:check-$$-${RANDOM}${RANDOM}"
+  trap 'docker image rm --force "$image" >/dev/null 2>&1 || true' EXIT
+  step uv run --project backend --locked pre-commit run hadolint --all-files
+  step .github/scripts/check-dockerfile-versions.sh Dockerfile
+  step docker build \
+    --build-arg NODE_BASE_VERSION="$(cat .nvmrc)" \
+    --build-arg PYTHON_BASE_VERSION="$(cat backend/.python-version)" \
+    --tag "$image" .
+  step .github/scripts/image-smoke-test.sh "$image"
+  step .github/scripts/image-scan.sh "$image"
+)
+
 check_hooks() (
   cd "$root"
   step .github/scripts/test-changed-areas.sh
   step .github/scripts/test-wait-for-pr-feedback.sh
+  step .github/scripts/test-check-dockerfile-versions.sh
   # pre-commit skips .claude/, so the agent setup has its own tests: the role
   # files, the shared settings and the control flow of the workflow script.
   step node --test ".claude/tests/*.test.mjs"
@@ -98,7 +118,7 @@ if [[ $1 == --changed ]]; then
   # changed-areas.sh fails open: when it cannot tell, it reports every area.
   touched=$("$root/.github/scripts/changed-areas.sh" "$2" "$3")
   while IFS='=' read -r area value; do
-    if [[ $value == true && ($area == backend || $area == frontend) ]]; then
+    if [[ $value == true && ($area == backend || $area == frontend || $area == image) ]]; then
       requested+=("$area")
     fi
   done <<<"$touched"
@@ -107,14 +127,15 @@ else
 fi
 
 # Validate every name before running anything, and expand the group names.
-backend=false frontend=false hooks=false history=false
+backend=false frontend=false image=false hooks=false history=false
 for area in "${requested[@]}"; do
   case $area in
     backend) backend=true ;;
     frontend) frontend=true ;;
+    image) image=true ;;
     hooks) hooks=true ;;
     hygiene) hooks=true history=true ;;
-    all) backend=true frontend=true hooks=true history=true ;;
+    all) backend=true frontend=true image=true hooks=true history=true ;;
     *)
       echo "unknown area: ${area}" >&2
       usage
@@ -124,6 +145,7 @@ done
 
 if [[ $backend == true ]]; then check_backend; fi
 if [[ $frontend == true ]]; then check_frontend; fi
+if [[ $image == true ]]; then check_image; fi
 if [[ $hooks == true ]]; then check_hooks; fi
 if [[ $history == true ]]; then check_history; fi
 

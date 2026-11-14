@@ -67,6 +67,13 @@ repos:
         language: system
         files: ^(\.nvmrc|(frontend|e2e)/package(-lock)?\.json)$
         pass_filenames: false
+      - id: dockerfile-versions
+        name: Dockerfile pins images by digest and writes no version
+        entry: .github/scripts/check-dockerfile-versions.sh
+        language: system
+        # Only the image's Dockerfile: .github/tools/trivy/Dockerfile is the
+        # Trivy version source and carries its version tag on purpose.
+        files: ^Dockerfile$
 
   - repo: https://github.com/gitleaks/gitleaks
     rev: 83d9cd684c87d95d656c1458ef04895a7f1cbd8e # frozen: v8.30.1
