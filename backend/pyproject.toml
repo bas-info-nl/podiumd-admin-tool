@@ -45,7 +45,7 @@ dev = [
 # The one uv version for local development and CI: uv refuses to run this
 # project with any other version, and astral-sh/setup-uv installs it in CI
 # (version-file: backend/pyproject.toml). Bump it here only.
-required-version = "==0.13.7"
+required-version = "==0.13.8"
 
 [tool.ruff]
 # target-version is inferred from requires-python.
