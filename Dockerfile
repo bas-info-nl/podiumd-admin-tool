@@ -48,7 +48,7 @@ RUN python -I -c 'import os, platform, sys; want = os.environ["PYTHON_BASE_VERSI
 # uv is pinned by digest only. It refuses to run the project unless it is the
 # version in [tool.uv] required-version (backend/pyproject.toml), so a uv bump
 # fails this build until the digest is updated too.
-COPY --from=ghcr.io/astral-sh/uv@sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv@sha256:5cc1805e2426484abca4ad46ea783bab281fdb225fd82d8ce6d66a81254bac85 /uv /usr/local/bin/uv
 ENV UV_COMPILE_BYTECODE=1 \
   UV_LINK_MODE=copy \
   UV_NO_CACHE=1 \
