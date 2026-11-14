@@ -68,6 +68,8 @@ class ReasonCode(StrEnum):
     """Exchanging the authorisation code for tokens failed."""
     NO_SESSION = "no-session"
     """A request without a valid session."""
+    INVALID_LOGOUT_TOKEN = "invalid-logout-token"  # noqa: S105 - a reason code, not a password
+    """A back-channel logout request whose logout token is not valid."""
 
 
 DENIAL_REASONS: Final = frozenset(
@@ -87,6 +89,7 @@ UNAUTHENTICATED_REASONS: Final = frozenset(
         ReasonCode.CALLBACK_ERROR,
         ReasonCode.TOKEN_EXCHANGE_FAILED,
         ReasonCode.NO_SESSION,
+        ReasonCode.INVALID_LOGOUT_TOKEN,
     }
 )
 

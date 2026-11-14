@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from fastapi import Request
 
 from podiumd_admin.config import Settings
+
+if TYPE_CHECKING:
+    from podiumd_admin.adapters.http.auth import AuthServices
 
 type ReadinessCheck = Callable[[], Awaitable[bool]]
 
@@ -18,6 +22,8 @@ class AppContext:
 
     settings: Settings
     readiness: ReadinessCheck
+    auth: AuthServices | None = None
+    """The authentication use cases; ``None`` in tests that do not sign in."""
 
 
 def app_context(request: Request) -> AppContext:

@@ -161,7 +161,7 @@ def owner_engine(migrated_database: Database) -> Iterator[Engine]:
     """An owner-role engine; empties the tables first, so every test starts clean."""
     engine = create_engine(migrated_database.owner_url, poolclass=NullPool)
     with engine.begin() as connection:
-        connection.execute(text("TRUNCATE audit_entries, sessions"))
+        connection.execute(text("TRUNCATE audit_entries, sessions, sign_in_attempts"))
     yield engine
     engine.dispose()
 

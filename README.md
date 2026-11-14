@@ -195,7 +195,7 @@ as a quick pass (CodeQL), so the required checks on `main` never wait. Pushes to
 
 | Area                           | Runs when a pull request changes                                                                                                    |
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `backend`                      | `backend/`, `.gitignore`, `ci.yml`                                                                                                  |
+| `backend`                      | `backend/`, `dev/keycloak/` (the shared Keycloak realm the backend integration tests import), `.gitignore`, `ci.yml`                |
 | `frontend`                     | `frontend/`, `e2e/`, `.nvmrc`, `.prettierrc.json`, `.prettierignore`, `.editorconfig`, `.gitignore`, `ci.yml`                       |
 | `image`                        | `backend/`, `frontend/`, `Dockerfile`, `.dockerignore`, `.nvmrc`, `.github/tools/trivy/`, the image scripts, `ci.yml`               |
 | CodeQL (python)                | `backend/`, any `*.py` or `*.pyi` file, `codeql.yml`                                                                                |

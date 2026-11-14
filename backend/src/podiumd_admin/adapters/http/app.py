@@ -13,25 +13,27 @@ from typing import Final
 
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 
 from podiumd_admin import __version__
 from podiumd_admin.adapters.db.unit_of_work import TransactionAbortedError
-from podiumd_admin.adapters.http import environment, health
+from podiumd_admin.adapters.http import auth, environment, health, session
+from podiumd_admin.adapters.http.auth import AuthServices
 from podiumd_admin.adapters.http.context import AppContext, ReadinessCheck
+from podiumd_admin.adapters.http.errors import ACTION_NOT_RECORDED, ErrorResponse
 from podiumd_admin.adapters.http.security_headers import SecurityHeadersMiddleware
+from podiumd_admin.adapters.http.session import (
+    NotSignedInError,
+    access_denied,
+    identity_provider_unavailable,
+    not_signed_in,
+)
 from podiumd_admin.application.audit import AuditWriteFailedError
+from podiumd_admin.application.authorisation import AccessDeniedError
 from podiumd_admin.config import Settings
+from podiumd_admin.ports.identity_provider import IdentityProviderUnavailableError
 
 API_PREFIX: Final = "/api/v1"
 TITLE: Final = "PodiumD Admin Tool"
-ACTION_NOT_RECORDED: Final = "action-not-recorded"
-
-
-class ErrorResponse(BaseModel):
-    """An error the frontend shows in Dutch, chosen by its code."""
-
-    error: str
 
 
 async def _action_not_recorded(_request: Request, _error: Exception) -> JSONResponse:
@@ -58,16 +60,27 @@ def build_app() -> FastAPI:
     )
     api = APIRouter(prefix=API_PREFIX)
     api.include_router(environment.router)
+    api.include_router(session.router)
     app.include_router(api)
     app.include_router(health.router)
+    app.include_router(auth.router)
     app.add_middleware(SecurityHeadersMiddleware)
     app.add_exception_handler(AuditWriteFailedError, _action_not_recorded)
     app.add_exception_handler(TransactionAbortedError, _action_not_recorded)
+    app.add_exception_handler(NotSignedInError, not_signed_in)
+    app.add_exception_handler(AccessDeniedError, access_denied)
+    app.add_exception_handler(IdentityProviderUnavailableError, identity_provider_unavailable)
     return app
 
 
-def create_app(settings: Settings, *, readiness: ReadinessCheck) -> FastAPI:
-    """The app for ``settings``; ``readiness`` tells whether the database is reachable."""
+def create_app(
+    settings: Settings, *, readiness: ReadinessCheck, auth: AuthServices | None = None
+) -> FastAPI:
+    """The app for ``settings``.
+
+    ``readiness`` tells whether the database is reachable; ``auth`` holds the
+    authentication use cases.
+    """
     app = build_app()
-    app.state.context = AppContext(settings=settings, readiness=readiness)
+    app.state.context = AppContext(settings=settings, readiness=readiness, auth=auth)
     return app

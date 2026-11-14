@@ -1,0 +1,106 @@
+{
+  "realm": "podiumd",
+  "displayName": "PodiumD Onsdorp (development)",
+  "enabled": true,
+  "sslRequired": "none",
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "roles": {
+    "client": {
+      "podiumd-admin": [
+        {
+          "name": "viewer",
+          "description": "Viewer of the PodiumD Admin Tool"
+        },
+        {
+          "name": "operator",
+          "description": "Operator of the PodiumD Admin Tool"
+        }
+      ]
+    }
+  },
+  "clients": [
+    {
+      "clientId": "podiumd-admin",
+      "name": "PodiumD Admin Tool",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "podiumd-admin-development-only",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": false,
+      "redirectUris": [
+        "https://admin.podiumd.onsdorp.example/auth/callback",
+        "https://localhost:8443/auth/callback"
+      ],
+      "webOrigins": [],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "https://admin.podiumd.onsdorp.example/signed-out##https://localhost:8443/signed-out",
+        "access.token.lifespan": "300",
+        "backchannel.logout.url": "https://admin.podiumd.onsdorp.example/auth/backchannel-logout",
+        "backchannel.logout.session.required": "true",
+        "backchannel.logout.revoke.offline.tokens": "false"
+      }
+    }
+  ],
+  "users": [
+    {
+      "username": "viewer",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "viewer@onsdorp.example",
+      "firstName": "Viewer",
+      "lastName": "Onsdorp",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "viewer",
+          "temporary": false
+        }
+      ],
+      "clientRoles": {
+        "podiumd-admin": ["viewer"]
+      }
+    },
+    {
+      "username": "operator",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "operator@onsdorp.example",
+      "firstName": "Operator",
+      "lastName": "Onsdorp",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "operator",
+          "temporary": false
+        }
+      ],
+      "clientRoles": {
+        "podiumd-admin": ["operator"]
+      }
+    },
+    {
+      "username": "norole",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "norole@onsdorp.example",
+      "firstName": "Norole",
+      "lastName": "Onsdorp",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "norole",
+          "temporary": false
+        }
+      ],
+      "clientRoles": {}
+    }
+  ]
+}

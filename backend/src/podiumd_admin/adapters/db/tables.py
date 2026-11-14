@@ -41,6 +41,7 @@ from podiumd_admin.domain.audit import (
 from podiumd_admin.domain.environment import Stage
 from podiumd_admin.domain.roles import Role
 from podiumd_admin.domain.session import MAX_KEYCLOAK_SESSION_ID_LENGTH
+from podiumd_admin.domain.sign_in import MAX_RANDOM_VALUE_LENGTH, MAX_RETURN_PATH_LENGTH
 
 SESSION_ID_HASH_LENGTH = 32
 """Bytes in a SHA-256 digest: the key of the ``sessions`` table."""
@@ -123,5 +124,21 @@ sessions = Table(
     CheckConstraint(f"octet_length(id_hash) = {SESSION_ID_HASH_LENGTH}", name="id_hash_length"),
     CheckConstraint(f"roles <@ ARRAY[{_sql_list([r.value for r in Role])}]::text[]", name="roles"),
     CheckConstraint("last_seen_at >= created_at", name="last_seen_after_created"),
+    CheckConstraint("expires_at > created_at", name="expires_after_created"),
+)
+
+sign_in_attempts = Table(
+    "sign_in_attempts",
+    metadata,
+    Column("id_hash", LargeBinary(), primary_key=True),
+    Column("state", String(MAX_RANDOM_VALUE_LENGTH), nullable=False),
+    Column("nonce", String(MAX_RANDOM_VALUE_LENGTH), nullable=False),
+    Column("code_verifier", String(128), nullable=False),
+    Column("return_path", String(MAX_RETURN_PATH_LENGTH), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Index("ix_sign_in_attempts_expires_at", "expires_at"),
+    CheckConstraint(f"octet_length(id_hash) = {SESSION_ID_HASH_LENGTH}", name="id_hash_length"),
+    CheckConstraint("return_path LIKE '/%'", name="return_path_relative"),
     CheckConstraint("expires_at > created_at", name="expires_after_created"),
 )

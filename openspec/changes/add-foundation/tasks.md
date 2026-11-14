@@ -63,13 +63,13 @@
 
 ## 7. Authentication adapter
 
-- [ ] 7.1 Write failing tests for the sign-in start: a pre-auth record with state, nonce, PKCE and the return path; a return path that isn't a single-`/` relative path becomes `/`; the redirect URI is built from `publicHostname` even with a forged Host or X-Forwarded-Host. Then implement with Authlib.
-- [ ] 7.2 Write failing tests for the callback. On success: rotate to a new session, set the `__Host-` cookie, and write one `sign-in/allowed` entry. No role → one `sign-in/denied/no-role` entry and the "no access" page. A bad state or error → no session, and the stdout aggregator records it. An audit insert failure → no session and an error page. Then implement.
-- [ ] 7.3 Write failing tests for the request-time session dependency: idle and absolute expiry; refresh of an expired access token before authorisation, with roles re-read; a refused refresh ends the session with `refresh-refused`; an ended session → 401. Then implement.
-- [ ] 7.4 Write failing tests for the expiry sweep background task. Abandoned sessions get exactly one `session-expired/info` entry within one sweep interval, and their tokens are purged. Then implement it (every minute, single replica).
-- [ ] 7.5 Write failing tests for `POST /auth/backchannel-logout`: validate the logout token against Keycloak's JWKS and end the sessions with matching `sid`, using reason `backchannel-logout`. Then implement.
-- [ ] 7.6 Write failing tests for `POST /api/v1/session/sign-out`. It needs the CSRF header and `session:sign-out`, writes `sign-out/allowed` before ending the session, and returns the `end_session_endpoint` URL. An audit failure → the session is kept and an error is returned. Then implement.
-- [ ] 7.7 Write integration tests against testcontainers Keycloak, with a realm import of the client, roles and users `viewer`, `operator` and `norole`, covering the full code flow, refresh and back-channel logout.
+- [x] 7.1 Write failing tests for the sign-in start: a pre-auth record with state, nonce, PKCE and the return path; a return path that isn't a single-`/` relative path becomes `/`; the redirect URI is built from `publicHostname` even with a forged Host or X-Forwarded-Host. Then implement with Authlib.
+- [x] 7.2 Write failing tests for the callback. On success: rotate to a new session, set the `__Host-` cookie, and write one `sign-in/allowed` entry. No role → one `sign-in/denied/no-role` entry and the "no access" page. A bad state or error → no session, and the stdout aggregator records it. An audit insert failure → no session and an error page. Then implement.
+- [x] 7.3 Write failing tests for the request-time session dependency: idle and absolute expiry; refresh of an expired access token before authorisation, with roles re-read; a refused refresh ends the session with `refresh-refused`; an ended session → 401. Then implement.
+- [x] 7.4 Write failing tests for the expiry sweep background task. Abandoned sessions get exactly one `session-expired/info` entry within one sweep interval, and their tokens are purged. Then implement it (every minute, single replica).
+- [x] 7.5 Write failing tests for `POST /auth/backchannel-logout`: validate the logout token against Keycloak's JWKS and end the sessions with matching `sid`, using reason `backchannel-logout`. Then implement.
+- [x] 7.6 Write failing tests for `POST /api/v1/session/sign-out`. It needs the CSRF header and `session:sign-out`, writes `sign-out/allowed` before ending the session, and returns the `end_session_endpoint` URL. An audit failure → the session is kept and an error is returned. Then implement.
+- [x] 7.7 Write integration tests against testcontainers Keycloak, with a realm import of the client, roles and users `viewer`, `operator` and `norole`, covering the full code flow, refresh and back-channel logout.
 
 ## 8. Authorisation in HTTP
 

@@ -7,13 +7,18 @@ encrypted with ``MultiFernet`` (see ``session_crypto``).
 The store works on the caller's connection and never commits, like the audit
 repository, so ending a session and recording that can share one unit of work
 (design D4).
+
+Removing a session deletes its row, which purges its tokens. The opaque ref
+of a ``StoredSession`` is the hex form of the row key, the hash: it cannot be
+presented as a session identifier.
 """
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Row, insert, select
+from sqlalchemy import ColumnElement, Row, delete, insert, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from podiumd_admin.adapters.db.session_crypto import (
@@ -21,9 +26,28 @@ from podiumd_admin.adapters.db.session_crypto import (
     TokenDecryptionError,
     hash_session_id,
 )
-from podiumd_admin.adapters.db.tables import sessions
+from podiumd_admin.adapters.db.tables import SESSION_ID_HASH_LENGTH, sessions
 from podiumd_admin.domain.roles import Role
 from podiumd_admin.domain.session import Session
+from podiumd_admin.ports.session import StoredSession
+
+
+def _ref_hash(ref: str) -> bytes | None:
+    """The ``id_hash`` a ref stands for, or ``None`` if ``ref`` is not one."""
+    try:
+        id_hash = bytes.fromhex(ref)
+    except ValueError:
+        return None
+    return id_hash if len(id_hash) == SESSION_ID_HASH_LENGTH else None
+
+
+def _expired(*, last_seen_until: datetime, now: datetime) -> ColumnElement[bool]:
+    """Last seen at or before ``last_seen_until``, or not valid after ``now``."""
+    return or_(sessions.c.last_seen_at <= last_seen_until, sessions.c.expires_at <= now)
+
+
+def _known(session_id: str) -> bool:
+    return isinstance(session_id, str) and bool(session_id.strip())
 
 
 class SqlSessionStore:
@@ -33,6 +57,20 @@ class SqlSessionStore:
         self._connection = connection
         self._cipher = cipher
 
+    def _values(self, session: Session) -> dict[str, Any]:
+        return {
+            "user_subject": session.user_subject,
+            "username": session.username,
+            "keycloak_session_id": session.keycloak_session_id,
+            "roles": sorted(role.value for role in session.roles),
+            "created_at": session.created_at,
+            "last_seen_at": session.last_seen_at,
+            "expires_at": session.expires_at,
+            "tokens": (
+                self._cipher.encrypt(session.tokens) if session.tokens is not None else None
+            ),
+        }
+
     async def add(self, session_id: str, session: Session) -> None:
         """Store ``session`` under the hash of ``session_id``.
 
@@ -40,20 +78,88 @@ class SqlSessionStore:
         the identifier is already in use.
         """
         await self._connection.execute(
-            insert(sessions).values(
-                id_hash=hash_session_id(session_id),
-                user_subject=session.user_subject,
-                username=session.username,
-                keycloak_session_id=session.keycloak_session_id,
-                roles=sorted(role.value for role in session.roles),
-                created_at=session.created_at,
-                last_seen_at=session.last_seen_at,
-                expires_at=session.expires_at,
-                tokens=(
-                    self._cipher.encrypt(session.tokens) if session.tokens is not None else None
-                ),
-            )
+            insert(sessions).values(id_hash=hash_session_id(session_id), **self._values(session))
         )
+
+    async def save(self, session_id: str, session: Session) -> bool:
+        """Replace the stored Session; ``False`` if it is no longer stored."""
+        if not _known(session_id):
+            return False
+        result = await self._connection.execute(
+            update(sessions)
+            .where(sessions.c.id_hash == hash_session_id(session_id))
+            .values(**self._values(session))
+        )
+        return result.rowcount == 1
+
+    async def remove(self, session_id: str) -> bool:
+        """Delete the row, and with it the tokens; ``False`` if there was none."""
+        if not _known(session_id):
+            return False
+        return await self._delete(hash_session_id(session_id))
+
+    async def remove_by_ref(self, ref: str) -> bool:
+        id_hash = _ref_hash(ref)
+        return id_hash is not None and await self._delete(id_hash)
+
+    async def remove_expired(
+        self, session_id: str, *, last_seen_until: datetime, now: datetime
+    ) -> bool:
+        """Delete the row only if it is still expired; ``False`` otherwise."""
+        if not _known(session_id):
+            return False
+        return await self._delete(
+            hash_session_id(session_id), _expired(last_seen_until=last_seen_until, now=now)
+        )
+
+    async def remove_expired_by_ref(
+        self, ref: str, *, last_seen_until: datetime, now: datetime
+    ) -> bool:
+        id_hash = _ref_hash(ref)
+        return id_hash is not None and await self._delete(
+            id_hash, _expired(last_seen_until=last_seen_until, now=now)
+        )
+
+    async def _delete(self, id_hash: bytes, *conditions: ColumnElement[bool]) -> bool:
+        """Delete the row if it matches ``conditions``.
+
+        Under READ COMMITTED a DELETE that meets a row a concurrent
+        transaction is updating waits for it, then checks ``conditions``
+        again against the committed row: a Session touched meanwhile is kept.
+        """
+        result = await self._connection.execute(
+            delete(sessions).where(sessions.c.id_hash == id_hash, *conditions)
+        )
+        return result.rowcount == 1
+
+    async def find_by_keycloak_session_id(self, keycloak_session_id: str) -> list[StoredSession]:
+        result = await self._connection.execute(
+            select(sessions).where(sessions.c.keycloak_session_id == keycloak_session_id)
+        )
+        return [self._stored(row) for row in result]
+
+    async def find_expired(
+        self, *, last_seen_until: datetime, now: datetime, limit: int
+    ) -> list[StoredSession]:
+        result = await self._connection.execute(
+            select(sessions)
+            .where(_expired(last_seen_until=last_seen_until, now=now))
+            .order_by(sessions.c.last_seen_at)
+            .limit(limit)
+        )
+        return [self._stored(row) for row in result]
+
+    def _stored(self, row: Row[Any]) -> StoredSession:
+        """A found session; tokens that cannot be decrypted count as purged.
+
+        The session must still be found, or a session whose key was rotated
+        out would never be ended and recorded.
+        """
+        try:
+            session = self._to_session(row)
+        except TokenDecryptionError:
+            session = self._to_session(row, with_tokens=False)
+        return StoredSession(ref=bytes(row.id_hash).hex(), session=session)
 
     async def get(self, session_id: str) -> Session | None:
         """Return the Session for ``session_id``, or ``None`` if it is not known.
@@ -75,7 +181,7 @@ class SqlSessionStore:
         except TokenDecryptionError:
             return None
 
-    def _to_session(self, row: Row[Any]) -> Session:
+    def _to_session(self, row: Row[Any], *, with_tokens: bool = True) -> Session:
         return Session(
             user_subject=row.user_subject,
             username=row.username,
@@ -84,5 +190,7 @@ class SqlSessionStore:
             created_at=row.created_at,
             last_seen_at=row.last_seen_at,
             expires_at=row.expires_at,
-            tokens=self._cipher.decrypt(row.tokens) if row.tokens is not None else None,
+            tokens=(
+                self._cipher.decrypt(row.tokens) if with_tokens and row.tokens is not None else None
+            ),
         )
