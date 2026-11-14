@@ -75,7 +75,11 @@ check_frontend() (
 
 check_image() (
   cd "$root"
-  local image=podiumd-admin:check
+  # A tag of its own per run: worktrees share one Docker daemon, so a fixed tag
+  # could be replaced by a parallel build before the smoke test or the scan,
+  # which would then check the other branch's image. Removed again on exit.
+  local image="podiumd-admin:check-$$-${RANDOM}${RANDOM}"
+  trap 'docker image rm --force "$image" >/dev/null 2>&1 || true' EXIT
   step uv run --project backend --locked pre-commit run hadolint --all-files
   step .github/scripts/check-dockerfile-versions.sh Dockerfile
   step docker build \
