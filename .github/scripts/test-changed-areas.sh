@@ -138,7 +138,7 @@ check "quote in frontend path: frontend, image and javascript-typescript" \
 repo=$(new_repo)
 head=$(commit_change "${repo}" 'mkdir -p dev/keycloak && echo x >dev/keycloak/podiumd-admin-realm.json')
 check "Keycloak realm change: backend only" \
-  'backend=true frontend=false codeql-python=false codeql-javascript-typescript=false' \
+  'backend=true frontend=false image=false codeql-python=false codeql-javascript-typescript=false' \
   "$(run_script "${repo}" -- "${head}^" "${head}")"
 
 repo=$(new_repo)
